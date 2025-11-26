@@ -8,8 +8,10 @@
 
 #include "gateway-lorawan-mac.h"
 
+#include "burst-tag.h"
 #include "lora-frame-header.h"
 #include "lora-net-device.h"
+#include "lora-phy.h"
 #include "lorawan-mac-header.h"
 
 #include "ns3/log.h"
@@ -111,6 +113,34 @@ GatewayLorawanMac::Receive(Ptr<const Packet> packet)
     LorawanMacHeader macHdr;
     packetCopy->PeekHeader(macHdr);
 
+    // --- Get channel info (freq, SF) from tag, if present ---
+    uint32_t freq = 0;
+    uint8_t sf = 0;
+    LoraTag loraTag;
+    if (packetCopy->PeekPacketTag(loraTag))
+    {
+        freq = loraTag.GetFrequency();
+        uint8_t dr = loraTag.GetDataRate();
+        sf = GetSfFromDataRate(dr);
+    }
+
+    // --- Node-side burst detection via BurstTag ---
+    BurstTag burstTag;
+    if (packetCopy->PeekPacketTag(burstTag))
+    {
+        if (burstTag.GetBurst() && !m_inBurstMac)
+        {
+            m_inBurstMac = true;
+            NS_LOG_INFO("Gateway entering Burst-MAC mode due to node-side burst flag.");
+        }
+    }
+
+    // --- Collision stats: successful reception on this (freq, SF) ---
+    if (freq != 0 && sf != 0)
+    {
+        UpdateChannelStats(freq, sf, false /* not a collision */);
+    }
+
     if (macHdr.IsUplink())
     {
         DynamicCast<LoraNetDevice>(m_device)->Receive(packetCopy);
@@ -129,6 +159,25 @@ void
 GatewayLorawanMac::FailedReception(Ptr<const Packet> packet)
 {
     NS_LOG_FUNCTION(this << packet);
+
+    // Failed reception usually implies collision or too-low SINR.
+    // We still try to classify it by (freq, SF) via the LoraTag.
+    Ptr<Packet> pktCopy = packet->Copy();
+    uint32_t freq = 0;
+    uint8_t sf = 0;
+
+    LoraTag loraTag;
+    if (pktCopy->PeekPacketTag(loraTag))
+    {
+        freq = loraTag.GetFrequency();
+        uint8_t dr = loraTag.GetDataRate();
+        sf = GetSfFromDataRate(dr);
+    }
+
+    if (freq != 0 && sf != 0)
+    {
+        UpdateChannelStats(freq, sf, true /* collision / failed */);
+    }
 }
 
 void
@@ -143,5 +192,50 @@ GatewayLorawanMac::GetWaitTime(uint32_t frequencyHz)
     NS_LOG_FUNCTION_NOARGS();
     return m_channelHelper->GetWaitTime(frequencyHz);
 }
+
+void
+GatewayLorawanMac::UpdateChannelStats(uint32_t frequencyHz, uint8_t sf, bool isCollision)
+{
+    if (sf == 0)
+    {
+        return;
+    }
+
+    ChannelKey key{frequencyHz, sf};
+    ChannelStats& stats = m_channelStats[key];
+
+    stats.total++;
+    if (isCollision)
+    {
+        stats.collisions++;
+    }
+
+    NS_LOG_DEBUG("Gateway channel stats: freq=" << frequencyHz << " Hz, SF" << unsigned(sf)
+                                                << " total=" << stats.total
+                                                << " collisions=" << stats.collisions);
+
+    // If already in Burst-MAC mode, no need to re-check threshold
+    if (m_inBurstMac)
+    {
+        return;
+    }
+
+    // Require a minimum sample size before evaluating collision rate
+    if (stats.total < m_minSamples)
+    {
+        return;
+    }
+
+    double rate = static_cast<double>(stats.collisions) / static_cast<double>(stats.total);
+
+    if (rate >= m_collisionThreshold)
+    {
+        m_inBurstMac = true;
+        NS_LOG_INFO("Gateway entering Burst-MAC mode due to high collision rate on channel "
+                    << "(freq=" << frequencyHz << " Hz, SF" << unsigned(sf) << "): collisions="
+                    << stats.collisions << ", total=" << stats.total << ", rate=" << rate);
+    }
+}
+
 } // namespace lorawan
 } // namespace ns3

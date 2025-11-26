@@ -44,16 +44,16 @@ using namespace lorawan;
 NS_LOG_COMPONENT_DEFINE("ComplexLorawanNetworkExample");
 
 // Network settings
-int nDevices = 200;                 //!< Number of end device nodes to create
+int nDevices = 1000;                //!< Number of end device nodes to create
 int nGateways = 1;                  //!< Number of gateway nodes to create
-double radiusMeters = 6400;         //!< Radius (m) of the deployment
+double radiusMeters = 6000;         //!< Radius (m) of the deployment
 double simulationTimeSeconds = 600; //!< Scenario duration (s) in simulated time
 
 // Channel model
 bool realisticChannelModel = false; //!< Whether to use a more realistic channel model with
                                     //!< Buildings and correlated shadowing
 
-int appPeriodSeconds = 600; //!< Duration (s) of the inter-transmission time of end devices
+int appPeriodSeconds = 10; //!< Duration (s) of the inter-transmission time of end devices
 
 // Output control
 bool printBuildingInfo = true; //!< Whether to print building information

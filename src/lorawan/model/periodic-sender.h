@@ -9,101 +9,64 @@
 #ifndef PERIODIC_SENDER_H
 #define PERIODIC_SENDER_H
 
-#include "lorawan-mac.h"
-
 #include "ns3/application.h"
-#include "ns3/attribute.h"
+#include "ns3/event-id.h"
 #include "ns3/nstime.h"
+#include "ns3/ptr.h"
+#include "ns3/random-variable-stream.h"
 
 namespace ns3
 {
 namespace lorawan
 {
 
+class EndDeviceLorawanMac; // forward declaration
+
 /**
  * @ingroup lorawan
  *
- * Implements a sender application generating packets following a periodic point process.
+ * This application periodically sends packets using the LoRaWAN MAC.
  */
 class PeriodicSender : public Application
 {
   public:
-    PeriodicSender();           //!< Default constructor
-    ~PeriodicSender() override; //!< Destructor
-
-    /**
-     *  Register this type.
-     *  @return The object TypeId.
-     */
     static TypeId GetTypeId();
 
-    /**
-     * Set the sending interval.
-     *
-     * @param interval The interval between two packet send instances.
-     */
-    void SetInterval(Time interval);
+    PeriodicSender();
+    ~PeriodicSender() override;
 
-    /**
-     * Get the sending interval.
-     *
-     * @return The interval between two packet sends.
-     */
+    void SetInterval(Time interval);
     Time GetInterval() const;
 
-    /**
-     * Set the initial delay of this application.
-     *
-     * @param delay The initial delay value.
-     */
     void SetInitialDelay(Time delay);
 
-    /**
-     * Set packet size.
-     *
-     * @param size The base packet size value in bytes.
-     */
+    void SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv);
     void SetPacketSize(uint8_t size);
 
-    /**
-     * Set to add randomness to the base packet size.
-     *
-     * On each call to SendPacket(), an integer number is picked from a random variable. That
-     * integer number is then added to the base packet size to create the new packet.
-     *
-     * @param rv The random variable used to extract the additional number of packet bytes.
-     * Extracted values can be negative, but if they are lower than the base packet size they
-     * produce a runtime error. This check is left to the caller during definition of the random
-     * variable.
-     */
-    void SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv);
-
-    /**
-     * Send a packet using the LoraNetDevice's Send method.
-     */
-    void SendPacket();
-
-    /**
-     * Start the application by scheduling the first SendPacket event.
-     */
+  protected:
     void StartApplication() override;
-
-    /**
-     * Stop the application.
-     */
     void StopApplication() override;
 
+    /// Actually send one packet and schedule the next.
+    void SendPacket();
+
   private:
-    Time m_interval;       //!< The interval between to consecutive send events.
-    Time m_initialDelay;   //!< The initial delay of this application.
-    EventId m_sendEvent;   //!< The sending event scheduled as next.
-    Ptr<LorawanMac> m_mac; //!< The MAC layer of this node.
-    uint8_t m_basePktSize; //!< The packet size.
-    Ptr<RandomVariableStream>
-        m_pktSizeRV; //!< The random variable that adds bytes to the packet size.
+    // --- Original fields ---
+    Time m_interval;                   //!< Inter-packet interval
+    Time m_initialDelay;               //!< Delay before first packet
+    uint8_t m_basePktSize;             //!< Base packet size (bytes)
+    Ptr<RandomVariableStream> m_pktSizeRV; //!< Optional extra size RV
+
+    Ptr<EndDeviceLorawanMac> m_mac;    //!< Pointer to MAC
+    EventId m_sendEvent;               //!< Event for next send
+
+    // --- NEW: Burst detection state ---
+    Time m_lastTxTime;                 //!< Time of last transmission
+    Time m_burstThreshold;             //!< Threshold for "burst" mode
+    bool m_isBurst;                    //!< Whether we are currently in burst
 };
 
 } // namespace lorawan
-
 } // namespace ns3
-#endif /* SENDER_APPLICATION */
+
+#endif // PERIODIC_SENDER_H

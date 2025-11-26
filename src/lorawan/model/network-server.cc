@@ -16,6 +16,7 @@
 #include "mac-command.h"
 #include "network-status.h"
 
+#include "ns3/log.h"
 #include "ns3/net-device.h"
 #include "ns3/node-container.h"
 #include "ns3/packet.h"
@@ -37,11 +38,10 @@ NetworkServer::GetTypeId()
         TypeId("ns3::NetworkServer")
             .SetParent<Application>()
             .AddConstructor<NetworkServer>()
-            .AddTraceSource(
-                "ReceivedPacket",
-                "Trace source that is fired when a packet arrives at the network server",
-                MakeTraceSourceAccessor(&NetworkServer::m_receivedPacket),
-                "ns3::Packet::TracedCallback")
+            .AddTraceSource("ReceivedPacket",
+                            "Trace fired when packet arrives at the network server",
+                            MakeTraceSourceAccessor(&NetworkServer::m_receivedPacket),
+                            "ns3::Packet::TracedCallback")
             .SetGroupName("lorawan");
     return tid;
 }
@@ -76,27 +76,22 @@ NetworkServer::AddGateway(Ptr<Node> gateway, Ptr<NetDevice> netDevice)
 {
     NS_LOG_FUNCTION(this << gateway);
 
-    // Get the PointToPointNetDevice
     Ptr<PointToPointNetDevice> p2pNetDevice;
     for (uint32_t i = 0; i < gateway->GetNDevices(); i++)
     {
         p2pNetDevice = DynamicCast<PointToPointNetDevice>(gateway->GetDevice(i));
         if (p2pNetDevice)
         {
-            // We found a p2pNetDevice on the gateway
             break;
         }
     }
 
-    // Get the gateway's LoRa MAC layer (assumes gateway's MAC is configured as first device)
     Ptr<GatewayLorawanMac> gwMac =
         DynamicCast<GatewayLorawanMac>(DynamicCast<LoraNetDevice>(gateway->GetDevice(0))->GetMac());
     NS_ASSERT(gwMac);
 
-    // Get the Address
     Address gatewayAddress = p2pNetDevice->GetAddress();
 
-    // Create new gatewayStatus
     Ptr<GatewayStatus> gwStatus = CreateObject<GatewayStatus>(gatewayAddress, netDevice, gwMac);
 
     m_status->AddGateway(gatewayAddress, gwStatus);
@@ -105,11 +100,7 @@ NetworkServer::AddGateway(Ptr<Node> gateway, Ptr<NetDevice> netDevice)
 void
 NetworkServer::AddNodes(NodeContainer nodes)
 {
-    NS_LOG_FUNCTION_NOARGS();
-
-    // For each node in the container, call the function to add that single node
-    NodeContainer::Iterator it;
-    for (it = nodes.Begin(); it != nodes.End(); it++)
+    for (auto it = nodes.Begin(); it != nodes.End(); it++)
     {
         AddNode(*it);
     }
@@ -118,25 +109,19 @@ NetworkServer::AddNodes(NodeContainer nodes)
 void
 NetworkServer::AddNode(Ptr<Node> node)
 {
-    NS_LOG_FUNCTION(this << node);
-
-    // Get the LoraNetDevice
     Ptr<LoraNetDevice> loraNetDevice;
     for (uint32_t i = 0; i < node->GetNDevices(); i++)
     {
         loraNetDevice = DynamicCast<LoraNetDevice>(node->GetDevice(i));
         if (loraNetDevice)
         {
-            // We found a LoraNetDevice on the node
             break;
         }
     }
 
-    // Get the MAC
     Ptr<ClassAEndDeviceLorawanMac> edLorawanMac =
         DynamicCast<ClassAEndDeviceLorawanMac>(loraNetDevice->GetMac());
 
-    // Update the NetworkStatus about the existence of this node
     m_status->AddNode(edLorawanMac);
 }
 
@@ -144,23 +129,15 @@ bool
 NetworkServer::Receive(Ptr<NetDevice> device,
                        Ptr<const Packet> packet,
                        uint16_t protocol,
-                       const Address& address)
+                       const Address& sender)
 {
-    NS_LOG_FUNCTION(this << packet << protocol << address);
+    NS_LOG_FUNCTION(this << packet << protocol << sender);
 
-    // Create a copy of the packet
-    Ptr<Packet> myPacket = packet->Copy();
-
-    // Fire the trace source
     m_receivedPacket(packet);
 
-    // Inform the scheduler of the newly arrived packet
+    // pass to scheduler + status + controller
     m_scheduler->OnReceivedPacket(packet);
-
-    // Inform the status of the newly arrived packet
-    m_status->OnReceivedPacket(packet, address);
-
-    // Inform the controller of the newly arrived packet
+    m_status->OnReceivedPacket(packet, sender);
     m_controller->OnNewPacket(packet);
 
     return true;
@@ -169,8 +146,6 @@ NetworkServer::Receive(Ptr<NetDevice> device,
 void
 NetworkServer::AddComponent(Ptr<NetworkControllerComponent> component)
 {
-    NS_LOG_FUNCTION(this << component);
-
     m_controller->Install(component);
 }
 

@@ -1,4 +1,5 @@
 set(source_files
+    model/burst-tag.cc
     model/lora-net-device.cc
     model/lorawan-mac.cc
     model/lora-phy.cc

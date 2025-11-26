@@ -97,6 +97,8 @@ main(int argc, char* argv[])
 
     // Create the LoraHelper
     LoraHelper helper = LoraHelper();
+    // from chat
+    helper.EnablePacketTracking();
 
     /************************
      *  Create End Devices  *
@@ -106,7 +108,7 @@ main(int argc, char* argv[])
 
     // Create a set of nodes
     NodeContainer endDevices;
-    endDevices.Create(1);
+    endDevices.Create(1000);
 
     // Assign a mobility model to the node
     mobility.Install(endDevices);
@@ -156,5 +158,21 @@ main(int argc, char* argv[])
 
     Simulator::Destroy();
 
+    // from chat
+    LoraPacketTracker& tracker = helper.GetPacketTracker();
+
+    std::string totalStr = tracker.CountMacPacketsGlobally(Seconds(0), Seconds(7200));
+    uint32_t total = std::stoi(totalStr);
+
+    std::string receivedStr = tracker.CountMacPacketsGlobally(Seconds(0), Seconds(7200));
+    uint32_t received = std::stoi(receivedStr);
+
+    double prr = (total == 0) ? 0 : (double)received / total * 100.0;
+
+    std::cout << "\n--- Baseline LoRaWAN PRR ---\n";
+    std::cout << "Packets Sent:     " << total << "\n";
+    std::cout << "Packets Received: " << received << "\n";
+    std::cout << "PRR:              " << prr << "%\n";
+    std::cout << "----------------------------\n";
     return 0;
 }

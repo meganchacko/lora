@@ -25,6 +25,9 @@
 #include "ns3/packet.h"
 #include "ns3/point-to-point-net-device.h"
 
+#include <map>
+#include <utility>
+
 namespace ns3
 {
 namespace lorawan
@@ -118,12 +121,21 @@ class NetworkServer : public Application
      */
     Ptr<NetworkStatus> GetNetworkStatus();
 
+    /**
+     * OPTIONAL helper: get how many burst packets we've seen on a given VC.
+     * VC is defined by (frequency, SF).
+     */
+    uint32_t GetBurstCountForVc(uint32_t freq, uint8_t sf) const;
+
   protected:
     Ptr<NetworkStatus> m_status;         //!< Ptr to the NetworkStatus object.
     Ptr<NetworkController> m_controller; //!< Ptr to the NetworkController object.
     Ptr<NetworkScheduler> m_scheduler;   //!< Ptr to the NetworkScheduler object.
 
     TracedCallback<Ptr<const Packet>> m_receivedPacket; //!< The `ReceivedPacket` trace source.
+
+    // NEW: track how many burst packets we’ve seen per virtual channel (freq, SF)
+    std::map<std::pair<uint32_t, uint8_t>, uint32_t> m_burstCountPerVc;
 };
 
 } // namespace lorawan

@@ -8,12 +8,15 @@
 
 #include "periodic-sender.h"
 
+#include "end-device-lorawan-mac.h"
 #include "lora-net-device.h"
+#include "burst-tag.h"
 
 #include "ns3/double.h"
 #include "ns3/log.h"
 #include "ns3/pointer.h"
 #include "ns3/string.h"
+#include "ns3/simulator.h"
 
 namespace ns3
 {
@@ -37,11 +40,8 @@ PeriodicSender::GetTypeId()
                                           MakeTimeAccessor(&PeriodicSender::GetInterval,
                                                            &PeriodicSender::SetInterval),
                                           MakeTimeChecker());
-    // .AddAttribute ("PacketSizeRandomVariable", "The random variable that determines the shape of
-    // the packet size, in bytes",
-    //                StringValue ("ns3::UniformRandomVariable[Min=0,Max=10]"),
-    //                MakePointerAccessor (&PeriodicSender::m_pktSizeRV),
-    //                MakePointerChecker <RandomVariableStream>());
+    // If you later want a PacketSizeRandomVariable Attribute, you can
+    // re-enable and adapt the original code here.
     return tid;
 }
 
@@ -49,8 +49,12 @@ PeriodicSender::PeriodicSender()
     : m_interval(Seconds(10)),
       m_initialDelay(Seconds(1)),
       m_basePktSize(10),
-      m_pktSizeRV(nullptr)
-
+      m_pktSizeRV(nullptr),
+      m_mac(nullptr),
+      m_sendEvent(),
+      m_lastTxTime(Seconds(0)),
+      m_burstThreshold(Seconds(10)),   // threshold for "high rate"
+      m_isBurst(false)
 {
     NS_LOG_FUNCTION_NOARGS();
 }
@@ -84,12 +88,14 @@ PeriodicSender::SetInitialDelay(Time delay)
 void
 PeriodicSender::SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv)
 {
+    NS_LOG_FUNCTION(this << rv);
     m_pktSizeRV = rv;
 }
 
 void
 PeriodicSender::SetPacketSize(uint8_t size)
 {
+    NS_LOG_FUNCTION(this << unsigned(size));
     m_basePktSize = size;
 }
 
@@ -98,7 +104,7 @@ PeriodicSender::SendPacket()
 {
     NS_LOG_FUNCTION(this);
 
-    // Create and send a new packet
+    // ---- Build packet (original behavior) ----
     Ptr<Packet> packet;
     if (m_pktSizeRV)
     {
@@ -109,12 +115,31 @@ PeriodicSender::SendPacket()
     {
         packet = Create<Packet>(m_basePktSize);
     }
+
+    // ---- NEW: Simple burst detection on the node side ----
+    Time now = Simulator::Now();
+    if (m_lastTxTime != Seconds(0))
+    {
+        Time interval = now - m_lastTxTime;
+        // If we're sending more frequently than the nominal app interval,
+        // treat it as burst mode.
+        m_isBurst = (interval < m_burstThreshold);
+    }
+    m_lastTxTime = now;
+
+    // Attach the burst flag as a packet tag
+    BurstTag tag;
+    tag.SetBurst(m_isBurst);
+    packet->AddPacketTag(tag);
+
+    NS_LOG_DEBUG("PeriodicSender sending packet, burst=" << m_isBurst
+                                                         << ", size=" << packet->GetSize());
+
+    // ---- Send via MAC ----
     m_mac->Send(packet);
 
-    // Schedule the next SendPacket event
+    // ---- Schedule next send ----
     m_sendEvent = Simulator::Schedule(m_interval, &PeriodicSender::SendPacket, this);
-
-    NS_LOG_DEBUG("Sent a packet of size " << packet->GetSize());
 }
 
 void
@@ -122,22 +147,20 @@ PeriodicSender::StartApplication()
 {
     NS_LOG_FUNCTION(this);
 
-    // Make sure we have a MAC layer
     if (!m_mac)
     {
-        // Assumes there's only one device
-        Ptr<LoraNetDevice> loraNetDevice = DynamicCast<LoraNetDevice>(m_node->GetDevice(0));
+        // Assume there is only one LoraNetDevice on this node
+        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(GetNode()->GetDevice(0));
+        NS_ASSERT(dev);
 
-        m_mac = loraNetDevice->GetMac();
+        m_mac = DynamicCast<EndDeviceLorawanMac>(dev->GetMac());
         NS_ASSERT(m_mac);
     }
 
-    // Schedule the next SendPacket event
     Simulator::Cancel(m_sendEvent);
-    NS_LOG_DEBUG("Starting up application with a first event with a " << m_initialDelay.As(Time::S)
-                                                                      << " delay");
+    NS_LOG_DEBUG("Starting PeriodicSender with initial delay "
+                 << m_initialDelay.As(Time::S));
     m_sendEvent = Simulator::Schedule(m_initialDelay, &PeriodicSender::SendPacket, this);
-    NS_LOG_DEBUG("Event Id: " << m_sendEvent.GetUid());
 }
 
 void

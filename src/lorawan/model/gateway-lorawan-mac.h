@@ -12,6 +12,13 @@
 #include "lora-tag.h"
 #include "lorawan-mac.h"
 
+#include "ns3/log.h"
+#include "ns3/nstime.h"
+#include "ns3/packet.h"
+
+#include <map>
+#include <cstdint>
+
 namespace ns3
 {
 namespace lorawan
@@ -61,8 +68,60 @@ class GatewayLorawanMac : public LorawanMac
      */
     Time GetWaitTime(uint32_t frequencyHz);
 
+    /**
+     * Check whether the gateway is currently in Burst-MAC mode.
+     */
+    bool IsInBurstMacMode() const
+    {
+        return m_inBurstMac;
+    }
+
   private:
-  protected:
+    // Key for a "virtual channel": (frequency, SF)
+    struct ChannelKey
+    {
+        uint32_t frequency;
+        uint8_t sf;
+
+        bool operator<(const ChannelKey& other) const
+        {
+            if (frequency < other.frequency)
+            {
+                return true;
+            }
+            if (frequency > other.frequency)
+            {
+                return false;
+            }
+            return sf < other.sf;
+        }
+    };
+
+    struct ChannelStats
+    {
+        uint32_t total = 0;
+        uint32_t collisions = 0;
+    };
+
+    /**
+     * Update collision statistics for a (frequency, SF) channel and,
+     * if thresholds are exceeded, trigger Burst-MAC mode.
+     *
+     * @param frequencyHz Channel center frequency [Hz].
+     * @param sf Spreading factor.
+     * @param isCollision Whether this event was a failed reception (collision).
+     */
+    void UpdateChannelStats(uint32_t frequencyHz, uint8_t sf, bool isCollision);
+
+    // Per-(freq,SF) stats
+    std::map<ChannelKey, ChannelStats> m_channelStats;
+
+    // Whether the gateway has entered Burst-MAC mode
+    bool m_inBurstMac = false;
+
+    // Collision-based trigger parameters
+    double m_collisionThreshold = 0.3; // e.g., 30% collisions
+    uint32_t m_minSamples = 10;        // Minimum samples before checking rate
 };
 
 } // namespace lorawan
