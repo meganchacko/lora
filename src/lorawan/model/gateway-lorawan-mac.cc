@@ -2,19 +2,17 @@
  * Copyright (c) 2017 University of Padova
  *
  * SPDX-License-Identifier: GPL-2.0-only
- *
- * Author: Davide Magrin <magrinda@dei.unipd.it>
  */
 
 #include "gateway-lorawan-mac.h"
 
-#include "burst-tag.h"
 #include "lora-frame-header.h"
 #include "lora-net-device.h"
-#include "lora-phy.h"
 #include "lorawan-mac-header.h"
+#include "burst-tag.h"
 
 #include "ns3/log.h"
+#include "ns3/simulator.h"
 
 namespace ns3
 {
@@ -22,16 +20,16 @@ namespace lorawan
 {
 
 NS_LOG_COMPONENT_DEFINE("GatewayLorawanMac");
-
 NS_OBJECT_ENSURE_REGISTERED(GatewayLorawanMac);
 
 TypeId
 GatewayLorawanMac::GetTypeId()
 {
-    static TypeId tid = TypeId("ns3::GatewayLorawanMac")
-                            .SetParent<LorawanMac>()
-                            .AddConstructor<GatewayLorawanMac>()
-                            .SetGroupName("lorawan");
+    static TypeId tid =
+        TypeId("ns3::GatewayLorawanMac")
+            .SetParent<LorawanMac>()
+            .AddConstructor<GatewayLorawanMac>()
+            .SetGroupName("lorawan");
     return tid;
 }
 
@@ -45,105 +43,158 @@ GatewayLorawanMac::~GatewayLorawanMac()
     NS_LOG_FUNCTION(this);
 }
 
-void
-GatewayLorawanMac::Send(Ptr<Packet> packet)
-{
-    NS_LOG_FUNCTION(this << packet);
-
-    // Get data rate to send this packet with
-    LoraTag tag;
-    packet->RemovePacketTag(tag);
-    uint8_t dataRate = tag.GetDataRate();
-    uint32_t frequencyHz = tag.GetFrequency();
-    NS_LOG_DEBUG("DR: " << unsigned(dataRate));
-    NS_LOG_DEBUG("SF: " << unsigned(GetSfFromDataRate(dataRate)));
-    NS_LOG_DEBUG("BW: " << GetBandwidthFromDataRate(dataRate));
-    NS_LOG_DEBUG("Freq: " << frequencyHz << " Hz");
-    packet->AddPacketTag(tag);
-
-    // Make sure we can transmit this packet
-    if (GetWaitTime(frequencyHz).IsStrictlyPositive())
-    {
-        // We cannot send now!
-        NS_LOG_WARN("Trying to send a packet but Duty Cycle won't allow it. Aborting.");
-        return;
-    }
-
-    LoraTxParameters params;
-    params.sf = GetSfFromDataRate(dataRate);
-    params.headerDisabled = false;
-    params.codingRate = 1;
-    params.bandwidthHz = GetBandwidthFromDataRate(dataRate);
-    params.nPreamble = 8;
-    params.crcEnabled = true;
-    params.lowDataRateOptimizationEnabled = LoraPhy::GetTSym(params) > MilliSeconds(16);
-
-    // Get the duration
-    Time duration = LoraPhy::GetOnAirTime(packet, params);
-
-    NS_LOG_DEBUG("Duration: " << duration.As(Time::S));
-
-    // Find the channel with the desired frequency
-    double sendingPower = m_channelHelper->GetTxPowerForChannel(frequencyHz);
-
-    // Add the event to the channelHelper to keep track of duty cycle
-    m_channelHelper->AddEvent(duration, frequencyHz);
-
-    // Send the packet to the PHY layer to send it on the channel
-    m_phy->Send(packet, params, frequencyHz, sendingPower);
-
-    m_sentNewPacket(packet);
-}
-
 bool
 GatewayLorawanMac::IsTransmitting()
 {
     return m_phy->IsTransmitting();
 }
 
+Time
+GatewayLorawanMac::GetWaitTime(uint32_t frequencyHz)
+{
+    return m_channelHelper->GetWaitTime(frequencyHz);
+}
+
+void
+GatewayLorawanMac::Send(Ptr<Packet> packet)
+{
+    NS_LOG_FUNCTION(this << packet);
+
+    LoraTag tag;
+    packet->PeekPacketTag(tag);
+
+    uint8_t dr = tag.GetDataRate();
+    uint8_t sf = GetSfFromDataRate(dr);
+    uint32_t freq = tag.GetFrequency();
+
+    LoraTxParameters params;
+    params.sf = sf;
+    params.headerDisabled = false;
+    params.codingRate = 1;
+    params.bandwidthHz = GetBandwidthFromDataRate(dr);
+    params.nPreamble = 8;
+    params.crcEnabled = true;
+    params.lowDataRateOptimizationEnabled = LoraPhy::GetTSym(params) > MilliSeconds(16);
+
+    Time duration = LoraPhy::GetOnAirTime(packet, params);
+    double txPower = m_channelHelper->GetTxPowerForChannel(freq);
+
+    m_channelHelper->AddEvent(duration, freq);
+    m_phy->Send(packet, params, freq, txPower);
+
+    m_sentNewPacket(packet);
+}
 void
 GatewayLorawanMac::Receive(Ptr<const Packet> packet)
 {
     NS_LOG_FUNCTION(this << packet);
 
-    // Make a copy of the packet to work on
+    // --------------------------------------------------
+    // 1) Make sure m_device is valid and is LoraNetDevice
+    // --------------------------------------------------
+    if (m_device == nullptr)
+    {
+        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(GetDevice());
+        if (dev)
+        {
+            m_device = dev;
+        }
+        else
+        {
+            NS_LOG_ERROR("GatewayLorawanMac: m_device is NULL and GetDevice() is not LoraNetDevice");
+            return;
+        }
+    }
+
+    Ptr<LoraNetDevice> loraDev = DynamicCast<LoraNetDevice>(m_device);
+    if (!loraDev)
+    {
+        NS_LOG_ERROR("GatewayLorawanMac: m_device is not a LoraNetDevice");
+        return;
+    }
+
+    // --------------------------------------------------
+    // 2) Work on a copy of the packet
+    // --------------------------------------------------
     Ptr<Packet> packetCopy = packet->Copy();
 
-    // Only forward the packet if it's uplink
+    // Read MAC header (from the front)
     LorawanMacHeader macHdr;
     packetCopy->PeekHeader(macHdr);
 
-    // --- Get channel info (freq, SF) from tag, if present ---
+    // --------------------------------------------------
+    // 3) Extract address correctly (strip MAC, then read FHDR)
+    // --------------------------------------------------
+    LoraDeviceAddress srcAddr;
+    bool haveAddr = false;
+
+    if (macHdr.GetMType() == LorawanMacHeader::UNCONFIRMED_DATA_UP ||
+        macHdr.GetMType() == LorawanMacHeader::CONFIRMED_DATA_UP)
+    {
+        Ptr<Packet> tmp = packet->Copy();
+
+        // First remove MAC header to move the iterator past it
+        LorawanMacHeader tmpMac;
+        tmp->RemoveHeader(tmpMac);
+
+        // Now the next header is the LoraFrameHeader
+        LoraFrameHeader fhdr;
+        if (tmp->PeekHeader(fhdr))
+        {
+            srcAddr = fhdr.GetAddress();
+            haveAddr = true;
+        }
+    }
+
+    // --------------------------------------------------
+    // 4) Extract frequency + SF from LoraTag
+    // --------------------------------------------------
     uint32_t freq = 0;
     uint8_t sf = 0;
-    LoraTag loraTag;
-    if (packetCopy->PeekPacketTag(loraTag))
+
+    LoraTag tag;
+    if (packetCopy->PeekPacketTag(tag))
     {
-        freq = loraTag.GetFrequency();
-        uint8_t dr = loraTag.GetDataRate();
+        freq = tag.GetFrequency();
+        uint8_t dr = tag.GetDataRate();
         sf = GetSfFromDataRate(dr);
     }
 
-    // --- Node-side burst detection via BurstTag ---
-    BurstTag burstTag;
-    if (packetCopy->PeekPacketTag(burstTag))
+    // --------------------------------------------------
+    // 5) Task 3: VC grouping (only for valid freq/SF + address)
+    // --------------------------------------------------
+    if (haveAddr && freq != 0 && sf != 0)
     {
-        if (burstTag.GetBurst() && !m_inBurstMac)
+        UpdateVcGroup(srcAddr, freq, sf);
+    }
+
+    // --------------------------------------------------
+    // 6) Task 2: Burst detection from node (BurstTag)
+    // --------------------------------------------------
+    BurstTag burstTag;
+    if (packetCopy->PeekPacketTag(burstTag) && burstTag.GetBurst())
+    {
+        if (!m_inBurstMac)
         {
             m_inBurstMac = true;
             NS_LOG_INFO("Gateway entering Burst-MAC mode due to node-side burst flag.");
         }
     }
 
-    // --- Collision stats: successful reception on this (freq, SF) ---
+    // --------------------------------------------------
+    // 7) Task 2: Collision stats (this is a successful reception)
+    // --------------------------------------------------
     if (freq != 0 && sf != 0)
     {
         UpdateChannelStats(freq, sf, false /* not a collision */);
     }
 
+    // --------------------------------------------------
+    // 8) Forward only uplink packets to the net device
+    // --------------------------------------------------
     if (macHdr.IsUplink())
     {
-        DynamicCast<LoraNetDevice>(m_device)->Receive(packetCopy);
+        loraDev->Receive(packetCopy);
 
         NS_LOG_DEBUG("Received packet: " << packet);
 
@@ -158,82 +209,58 @@ GatewayLorawanMac::Receive(Ptr<const Packet> packet)
 void
 GatewayLorawanMac::FailedReception(Ptr<const Packet> packet)
 {
-    NS_LOG_FUNCTION(this << packet);
-
-    // Failed reception usually implies collision or too-low SINR.
-    // We still try to classify it by (freq, SF) via the LoraTag.
-    Ptr<Packet> pktCopy = packet->Copy();
-    uint32_t freq = 0;
-    uint8_t sf = 0;
-
-    LoraTag loraTag;
-    if (pktCopy->PeekPacketTag(loraTag))
+    LoraTag tag;
+    if (packet->PeekPacketTag(tag))
     {
-        freq = loraTag.GetFrequency();
-        uint8_t dr = loraTag.GetDataRate();
-        sf = GetSfFromDataRate(dr);
-    }
+        uint32_t freq = tag.GetFrequency();
+        uint8_t dr = tag.GetDataRate();
+        uint8_t sf = GetSfFromDataRate(dr);
 
-    if (freq != 0 && sf != 0)
-    {
-        UpdateChannelStats(freq, sf, true /* collision / failed */);
+        UpdateChannelStats(freq, sf, true);
     }
 }
 
 void
 GatewayLorawanMac::TxFinished(Ptr<const Packet> packet)
 {
-    NS_LOG_FUNCTION_NOARGS();
-}
-
-Time
-GatewayLorawanMac::GetWaitTime(uint32_t frequencyHz)
-{
-    NS_LOG_FUNCTION_NOARGS();
-    return m_channelHelper->GetWaitTime(frequencyHz);
 }
 
 void
-GatewayLorawanMac::UpdateChannelStats(uint32_t frequencyHz, uint8_t sf, bool isCollision)
+GatewayLorawanMac::UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t sf)
 {
-    if (sf == 0)
-    {
-        return;
-    }
+    auto key = std::make_pair(freq, sf);
+    m_vcGroups[key].insert(addr);
 
-    ChannelKey key{frequencyHz, sf};
-    ChannelStats& stats = m_channelStats[key];
+    NS_LOG_INFO("VC Update: Device " << addr.Get() << " on (freq="
+                                     << freq << " Hz, SF" << unsigned(sf) << ")");
+}
 
-    stats.total++;
-    if (isCollision)
-    {
-        stats.collisions++;
-    }
+void
+GatewayLorawanMac::UpdateChannelStats(uint32_t freq, uint8_t sf, bool collision)
+{
+    auto key = std::make_pair(freq, sf);
 
-    NS_LOG_DEBUG("Gateway channel stats: freq=" << frequencyHz << " Hz, SF" << unsigned(sf)
-                                                << " total=" << stats.total
-                                                << " collisions=" << stats.collisions);
+    if (collision)
+        m_collisionCount[key]++;
+    else
+        m_successCount[key]++;
 
-    // If already in Burst-MAC mode, no need to re-check threshold
-    if (m_inBurstMac)
-    {
-        return;
-    }
+    CheckBurstCondition(freq, sf);
+}
 
-    // Require a minimum sample size before evaluating collision rate
-    if (stats.total < m_minSamples)
-    {
-        return;
-    }
+void
+GatewayLorawanMac::CheckBurstCondition(uint32_t freq, uint8_t sf)
+{
+    auto key = std::make_pair(freq, sf);
 
-    double rate = static_cast<double>(stats.collisions) / static_cast<double>(stats.total);
+    uint32_t succ = m_successCount[key];
+    uint32_t coll = m_collisionCount[key];
 
-    if (rate >= m_collisionThreshold)
+    if (coll > succ && !m_inBurstMac)
     {
         m_inBurstMac = true;
-        NS_LOG_INFO("Gateway entering Burst-MAC mode due to high collision rate on channel "
-                    << "(freq=" << frequencyHz << " Hz, SF" << unsigned(sf) << "): collisions="
-                    << stats.collisions << ", total=" << stats.total << ", rate=" << rate);
+        NS_LOG_INFO("Gateway entering Burst-MAC due to high collision rate "
+                    << "(freq=" << freq << ", SF=" << unsigned(sf) << ")");
     }
 }
 

@@ -84,14 +84,14 @@ main(int argc, char* argv[])
     // LogComponentEnable("LorawanMac", LOG_LEVEL_ALL);
     // LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
     // LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
-    // LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
+    LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
     // LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
     // LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
     // LogComponentEnable("LoraHelper", LOG_LEVEL_ALL);
     // LogComponentEnable("LoraPhyHelper", LOG_LEVEL_ALL);
     // LogComponentEnable("LorawanMacHelper", LOG_LEVEL_ALL);
     // LogComponentEnable("PeriodicSenderHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
+    LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
     // LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
     // LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
     // LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);

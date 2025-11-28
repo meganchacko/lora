@@ -11,120 +11,61 @@
 
 #include "lora-tag.h"
 #include "lorawan-mac.h"
-
-#include "ns3/log.h"
-#include "ns3/nstime.h"
-#include "ns3/packet.h"
+#include "lora-frame-header.h"
+#include "lora-device-address.h"
 
 #include <map>
-#include <cstdint>
+#include <set>
 
 namespace ns3
 {
 namespace lorawan
 {
 
-/**
- * @ingroup lorawan
- *
- * Class representing the MAC layer of a LoRaWAN gateway.
- */
 class GatewayLorawanMac : public LorawanMac
 {
-  public:
-    /**
-     *  Register this type.
-     *  @return The object TypeId.
-     */
+public:
     static TypeId GetTypeId();
 
-    GatewayLorawanMac();           //!< Default constructor
-    ~GatewayLorawanMac() override; //!< Destructor
+    GatewayLorawanMac();
+    ~GatewayLorawanMac() override;
 
-    // Implementation of the LorawanMac interface
     void Send(Ptr<Packet> packet) override;
-
-    /**
-     * Check whether the underlying PHY layer of the gateway is currently transmitting.
-     *
-     * @return True if it is transmitting, false otherwise.
-     */
-    bool IsTransmitting();
-
-    // Implementation of the LorawanMac interface
     void Receive(Ptr<const Packet> packet) override;
-
-    // Implementation of the LorawanMac interface
     void FailedReception(Ptr<const Packet> packet) override;
-
-    // Implementation of the LorawanMac interface
     void TxFinished(Ptr<const Packet> packet) override;
 
-    /**
-     * Return the next time at which we will be able to transmit on the specified frequency.
-     *
-     * @param frequencyHz The frequency value [Hz].
-     * @return The next transmission time.
-     */
+    bool IsTransmitting();
     Time GetWaitTime(uint32_t frequencyHz);
 
-    /**
-     * Check whether the gateway is currently in Burst-MAC mode.
-     */
-    bool IsInBurstMacMode() const
-    {
-        return m_inBurstMac;
-    }
+private:
 
-  private:
-    // Key for a "virtual channel": (frequency, SF)
-    struct ChannelKey
-    {
-        uint32_t frequency;
-        uint8_t sf;
+    // ---------------------
+    // Task 2 — Burst MAC
+    // ---------------------
+    bool m_inBurstMac = false;  
 
-        bool operator<(const ChannelKey& other) const
-        {
-            if (frequency < other.frequency)
-            {
-                return true;
-            }
-            if (frequency > other.frequency)
-            {
-                return false;
-            }
-            return sf < other.sf;
-        }
-    };
+    // Track collisions and successes per (freq, SF)
+    std::map<std::pair<uint32_t, uint8_t>, uint32_t> m_successCount;
+    std::map<std::pair<uint32_t, uint8_t>, uint32_t> m_collisionCount;
 
-    struct ChannelStats
-    {
-        uint32_t total = 0;
-        uint32_t collisions = 0;
-    };
+    void UpdateChannelStats(uint32_t freq, uint8_t sf, bool collision);
 
-    /**
-     * Update collision statistics for a (frequency, SF) channel and,
-     * if thresholds are exceeded, trigger Burst-MAC mode.
-     *
-     * @param frequencyHz Channel center frequency [Hz].
-     * @param sf Spreading factor.
-     * @param isCollision Whether this event was a failed reception (collision).
-     */
-    void UpdateChannelStats(uint32_t frequencyHz, uint8_t sf, bool isCollision);
+    // Trigger Burst-MAC when collision threshold exceeded
+    void CheckBurstCondition(uint32_t freq, uint8_t sf);
 
-    // Per-(freq,SF) stats
-    std::map<ChannelKey, ChannelStats> m_channelStats;
+    // ---------------------
+    // Task 3 — Virtual Channels
+    // ---------------------
+    // VC = (frequency, SF) → set of device addresses
+    std::map<std::pair<uint32_t, uint8_t>, std::set<LoraDeviceAddress>> m_vcGroups;
 
-    // Whether the gateway has entered Burst-MAC mode
-    bool m_inBurstMac = false;
+    void UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t sf);
 
-    // Collision-based trigger parameters
-    double m_collisionThreshold = 0.3; // e.g., 30% collisions
-    uint32_t m_minSamples = 10;        // Minimum samples before checking rate
+protected:
 };
 
 } // namespace lorawan
-
 } // namespace ns3
+
 #endif /* GATEWAY_LORAWAN_MAC_H */
