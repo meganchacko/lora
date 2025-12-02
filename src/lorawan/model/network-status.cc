@@ -12,12 +12,17 @@
 #include "end-device-status.h"
 #include "gateway-status.h"
 #include "lora-device-address.h"
+#include "schedule-tag.h"
+#include "beacon-tag.h"
 
 #include "ns3/log.h"
 #include "ns3/net-device.h"
 #include "ns3/node-container.h"
 #include "ns3/packet.h"
 #include "ns3/pointer.h"
+#include "ns3/simulator.h"
+
+extern std::map<ns3::lorawan::LoraDeviceAddress, std::tuple<uint32_t, uint32_t, uint8_t>> g_pendingSchedules;
 
 namespace ns3
 {
@@ -166,11 +171,48 @@ NetworkStatus::SendThroughGateway(Ptr<Packet> packet, Address gwAddress)
 Ptr<Packet>
 NetworkStatus::GetReplyForDevice(LoraDeviceAddress edAddress, int windowNumber)
 {
+    NS_LOG_FUNCTION(this << edAddress << windowNumber);
+    
     // Get the reply packet
     Ptr<EndDeviceStatus> edStatus = m_endDeviceStatuses.find(edAddress)->second;
     Ptr<Packet> packet = edStatus->GetCompleteReplyPacket();
 
-    // Apply the appropriate tag
+    NS_LOG_INFO("GetReplyForDevice called for device=" << edAddress << " window=" << windowNumber);
+
+    // Task 5: Attach pending schedule if available
+    auto schedIt = g_pendingSchedules.find(edAddress);
+    if (schedIt != g_pendingSchedules.end())
+    {
+        uint32_t slot = std::get<0>(schedIt->second);
+        uint32_t groupSize = std::get<1>(schedIt->second);
+        uint8_t sf = std::get<2>(schedIt->second);
+        
+        ScheduleTag schedTag;
+        schedTag.Set(slot, groupSize, sf);
+        packet->AddPacketTag(schedTag);
+        
+        NS_LOG_INFO("Network server attached schedule to reply: device=" << edAddress
+                    << " slot=" << slot << " groupSize=" << groupSize << " SF=" << (uint32_t)sf);
+        
+        // Keep schedule until node is observed to switch modes; attaching repeatedly improves delivery probability
+    }
+    else
+    {
+        NS_LOG_INFO("No pending schedule for device=" << edAddress);
+    }
+
+    // Attach a beacon tag as a lightweight sync hint (Task 6)
+    {
+        BeaconTag beacon;
+        // Use current simulation time in milliseconds as epoch
+        uint32_t epochMs = static_cast<uint32_t>(Simulator::Now().GetMilliSeconds());
+        beacon.SetEpoch(epochMs);
+        packet->AddPacketTag(beacon);
+        NS_LOG_INFO("Network server attached beacon to reply: device=" << edAddress
+                    << " epochMs=" << epochMs);
+    }
+
+    // Apply the appropriate LoRa tag
     LoraTag tag;
     switch (windowNumber)
     {

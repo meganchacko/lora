@@ -15,6 +15,8 @@
 #include "end-device-lora-phy.h"
 #include "end-device-lorawan-mac.h"
 #include "lora-tag.h"
+#include "schedule-tag.h"
+#include "beacon-tag.h"
 
 #include "ns3/log.h"
 
@@ -86,6 +88,19 @@ ClassAEndDeviceLorawanMac::SendToPhy(Ptr<Packet> packetToSend)
     // Wake up PHY layer and directly send the packet
 
     Ptr<LogicalLoraChannel> txChannel = GetRandomChannelForTx();
+    if (txChannel == nullptr)
+    {
+        // No channel currently available due to duty cycle; postpone safely
+        Time delay = GetNextTxDelaySafe();
+        if (!delay.IsStrictlyPositive())
+        {
+            // Fallback guard: if helper returned zero but channel list is empty, add a small backoff
+            delay = MilliSeconds(200);
+        }
+        NS_LOG_WARN("No suitable TX channel in SendToPhy; postponing by " << delay.As(Time::S));
+        PostponeTransmission(delay, packetToSend);
+        return;
+    }
 
     NS_LOG_DEBUG("PacketToSend: " << packetToSend);
     m_phy->Send(packetToSend, params, txChannel->GetFrequency(), m_txPowerDbm);
@@ -164,6 +179,21 @@ ClassAEndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
             packet->PeekPacketTag(tag);
             /// @see ns3::lorawan::AdrComponent::RxPowerToSNR
             m_lastRxSnr = tag.GetReceivePower() + 174 - 10 * log10(125000) - 6;
+
+            // Task 5: Check for schedule tag
+            ScheduleTag schedTag;
+            if (packet->PeekPacketTag(schedTag))
+            {
+                ApplySchedule(schedTag.GetSlot(), schedTag.GetGroupSize(), schedTag.GetSf());
+            }
+
+            // Task 6: Check for beacon tag
+            BeaconTag beaconTag;
+            if (packet->PeekPacketTag(beaconTag))
+            {
+                EnterBurstMode();
+                NS_LOG_INFO("Node received beacon, epoch=" << beaconTag.GetEpoch());
+            }
 
             // Parse the MAC commands
             ParseCommands(fHdr);

@@ -121,9 +121,16 @@ PeriodicSender::SendPacket()
     if (m_lastTxTime != Seconds(0))
     {
         Time interval = now - m_lastTxTime;
-        // If we're sending more frequently than the nominal app interval,
-        // treat it as burst mode.
-        m_isBurst = (interval < m_burstThreshold);
+        // If sending more frequently than threshold -> enter burst
+        // Else -> exit burst (Task 6 switching back)
+        if (interval < m_burstThreshold)
+        {
+            m_isBurst = true;
+        }
+        else
+        {
+            m_isBurst = false;
+        }
     }
     m_lastTxTime = now;
 
@@ -135,7 +142,8 @@ PeriodicSender::SendPacket()
     NS_LOG_DEBUG("PeriodicSender sending packet, burst=" << m_isBurst
                                                          << ", size=" << packet->GetSize());
 
-    // ---- Send via MAC ----
+    // ---- Request confirmation BEFORE sending to trigger server replies ----
+    m_mac->SetMType(LorawanMacHeader::CONFIRMED_DATA_UP);
     m_mac->Send(packet);
 
     // ---- Schedule next send ----

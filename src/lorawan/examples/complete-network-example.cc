@@ -76,28 +76,30 @@ main(int argc, char* argv[])
 
     // Set up logging
     LogComponentEnable("ComplexLorawanNetworkExample", LOG_LEVEL_ALL);
-    // LogComponentEnable("LoraChannel", LOG_LEVEL_INFO);
-    // LogComponentEnable("LoraPhy", LOG_LEVEL_ALL);
-    // LogComponentEnable("EndDeviceLoraPhy", LOG_LEVEL_ALL);
-    // LogComponentEnable("GatewayLoraPhy", LOG_LEVEL_ALL);
-    // LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("LorawanMac", LOG_LEVEL_ALL);
-    // LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
-    // LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
-    LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
-    // LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
-    // LogComponentEnable("LoraHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("LoraPhyHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("LorawanMacHelper", LOG_LEVEL_ALL);
-    // LogComponentEnable("PeriodicSenderHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraChannel", LOG_LEVEL_INFO);
+    LogComponentEnable("LoraPhy", LOG_LEVEL_ALL);
+    LogComponentEnable("EndDeviceLoraPhy", LOG_LEVEL_ALL);
+    LogComponentEnable("GatewayLoraPhy", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LorawanMac", LOG_LEVEL_ALL);
+    LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_INFO);
+    LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
+    LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_INFO);
+    LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraPhyHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LorawanMacHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("PeriodicSenderHelper", LOG_LEVEL_ALL);
     LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
-    // LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
-    // LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
-    // LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
-    // LogComponentEnable("NetworkServer", LOG_LEVEL_ALL);
-    // LogComponentEnable("NetworkStatus", LOG_LEVEL_ALL);
-    // LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
+    LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkServer", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkStatus", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
+    LogComponentEnable("ScheduleTag", LOG_LEVEL_ALL);
+
 
     /***********
      *  Setup  *

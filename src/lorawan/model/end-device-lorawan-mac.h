@@ -324,6 +324,7 @@ class EndDeviceLorawanMac : public LorawanMac
     static constexpr uint16_t ADR_ACK_DELAY = 32; //!< ADRACKCnt threshold for ADR backoff action
 
   protected:
+
     /**
      * Structure representing the parameters that will be used in the
      * retransmission procedure.
@@ -407,7 +408,45 @@ class EndDeviceLorawanMac : public LorawanMac
      */
     TracedCallback<uint8_t, bool, Time, Ptr<Packet>> m_requiredTxCallback;
 
+  protected:
+    // Helpers for subclasses to adjust Burst-MAC state without accessing privates
+    void ApplySchedule(uint32_t slot, uint32_t groupSize, uint8_t sf);
+    void EnterBurstMode();
+    // Helper for subclasses to query next TX delay without exposing internals
+    Time GetNextTxDelaySafe();
+
   private:
+    // --- Burst-MAC Scheduling State (Task 4+) ---
+    bool m_inBurstMac = false;   // set when node detects burst mode
+    bool m_hasSchedule = false;  // true after receiving ScheduleTag
+
+    uint32_t m_slotIndex = 0;    // assigned hash slot
+    uint32_t m_groupSize = 1;    // number of nodes in this VC
+    uint8_t  m_sf = 7;           // spreading factor (needed for slot length)
+
+    // Inline helper to compute slot length from SF (Task 4)
+    Time GetSlotLength(uint8_t sf)
+    {
+        Time L = MilliSeconds(100);
+
+        switch (sf)
+        {
+            case 7:  return L;
+            case 8:  return 2 * L;
+            case 9:  return 3 * L;
+            case 10: return 4 * L;
+            case 11: return 5 * L;
+            case 12: return 6 * L;
+        }
+        return 4 * L;
+    }
+
+    // Inline helper to perform scheduled send (Task 4)
+    void DoScheduledSend(Ptr<Packet> packet)
+    {
+        DoSend(packet);
+    }
+
     /**
      * Get the set of active transmission channels compatible with the current device data rate and
      * transmission power.

@@ -8,6 +8,10 @@
  */
 
 #include "network-server.h"
+#include "beacon-tag.h"
+#include "lora-net-device.h"
+#include "lorawan-mac-header.h"
+#include "lora-frame-header.h"
 
 #include "class-a-end-device-lorawan-mac.h"
 #include "lora-device-address.h"
@@ -141,6 +145,56 @@ NetworkServer::Receive(Ptr<NetDevice> device,
     m_controller->OnNewPacket(packet);
 
     return true;
+}
+
+// Periodic beacon broadcast in burst mode (Task 6)
+static Time g_beaconPeriod = Seconds(10);
+
+void
+NetworkServer::StartBurstBeacons()
+{
+    // Schedule first beacon
+    Simulator::Schedule(Seconds(2.0), &NetworkServer::SendBeacon, this);
+}
+
+void
+NetworkServer::SendBeacon()
+{
+    // Iterate gateways and send a small downlink with BeaconTag
+    for (auto &kv : m_status->m_gatewayStatuses)
+    {
+        Ptr<GatewayStatus> gwStatus = kv.second;
+        Address gwAddress = kv.first;
+
+        Ptr<Packet> down = Create<Packet>();
+
+        // Prepare headers (broadcast-like, but we attach mac+fhdr minimally)
+        LoraFrameHeader fhdr;
+        fhdr.SetAsDownlink();
+        fhdr.SetAddress(LoraDeviceAddress(0)); // address 0 indicates beacon/general
+        fhdr.SetFCnt(0);
+        down->AddHeader(fhdr);
+
+        LorawanMacHeader macHdr;
+        macHdr.SetMType(LorawanMacHeader::UNCONFIRMED_DATA_DOWN);
+        macHdr.SetMajor(1);
+        down->AddHeader(macHdr);
+
+        BeaconTag bt;
+        bt.SetEpoch(Simulator::Now().GetMilliSeconds());
+        down->AddPacketTag(bt);
+
+        // Use first RX window parameters of gateway region (approximate):
+        LoraTag tag;
+        tag.SetDataRate(5);           // DR5 (SF7) default beacon DR
+        tag.SetFrequency(868100000);  // EU default first channel
+        down->AddPacketTag(tag);
+
+        gwStatus->GetNetDevice()->Send(down, gwAddress, 0x0800);
+    }
+
+    // Reschedule next beacon
+    Simulator::Schedule(g_beaconPeriod, &NetworkServer::SendBeacon, this);
 }
 
 void

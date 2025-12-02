@@ -17,6 +17,10 @@
 #include "ns3/energy-source-container.h"
 #include "ns3/log.h"
 #include "ns3/simulator.h"
+#include "schedule-tag.h"
+#include "burst-tag.h"
+#include "beacon-tag.h"
+#include <cmath>   // for floor(...)
 
 #include <bitset>
 
@@ -145,75 +149,111 @@ EndDeviceLorawanMac::Send(Ptr<Packet> packet)
 {
     NS_LOG_FUNCTION(this << packet);
 
-    // Retx are scheduled by Receive, FailedReception, CloseSecondReceiveWindow only if retxLeft > 0
+    // ----------------------------------------------------------------------
+    // RETRANSMISSION HANDLING
+    // ----------------------------------------------------------------------
     NS_ASSERT_MSG(packet != m_retxParams.packet || m_retxParams.retxLeft > 0,
                   "Max number of transmissions already achieved for this packet");
 
     if (packet == m_retxParams.packet)
     {
         NS_LOG_DEBUG("Retransmitting an old packet.");
-        // Fail if it is a retransmission already ACKed
-        NS_ASSERT_MSG(m_retxParams.waitingAck, "Trying to retransmit a packet already ACKed.");
-        // Remove the headers
+
+        NS_ASSERT_MSG(m_retxParams.waitingAck,
+                      "Trying to retransmit a packet already ACKed.");
+
+        // Remove old headers so fresh ones can be added
         LorawanMacHeader macHdr;
         packet->RemoveHeader(macHdr);
+
         LoraFrameHeader frameHdr;
         packet->RemoveHeader(frameHdr);
     }
-    else // this is a new packet
+    else
     {
         NS_LOG_DEBUG("New FRMPayload from application: " << packet);
-        // If needed, trace failed ACKnowledgement of previous packet
+
+        // Stop an old retransmission process if needed
         if (m_retxParams.waitingAck)
         {
             uint8_t txs = m_nbTrans - m_retxParams.retxLeft;
-            NS_LOG_WARN("Stopping retransmission procedure of previous packet. Used "
-                        << unsigned(txs) << " transmissions out of " << unsigned(m_nbTrans));
-            m_requiredTxCallback(txs, false, m_retxParams.firstAttempt, m_retxParams.packet);
+            NS_LOG_WARN("Stopping old retransmission (used "
+                        << unsigned(txs) << "/" << unsigned(m_nbTrans) << ").");
+
+            m_requiredTxCallback(txs, false, m_retxParams.firstAttempt,
+                                 m_retxParams.packet);
         }
     }
 
-    // Evaluate ADR backoff as in LoRaWAN specification, V1.0.4 (2020)
-    // Adapted from: github.com/Lora-net/SWL2001.git v4.8.0
-    m_adrAckReq = (m_adrAckCnt >= ADR_ACK_LIMIT); // Set the ADRACKReq bit in frame header
+    // ----------------------------------------------------------------------
+    // ADR / ADR BACKOFF (LoRaWAN Spec)
+    // ----------------------------------------------------------------------
+    m_adrAckReq = (m_adrAckCnt >= ADR_ACK_LIMIT);
+
     if (m_adrAckCnt >= ADR_ACK_LIMIT + ADR_ACK_DELAY)
     {
-        // Unreachable by retx: they do not increase ADRACKCnt
         ExecuteADRBackoff();
         m_adrAckCnt = ADR_ACK_LIMIT;
     }
-    NS_ASSERT(m_adrAckCnt < 2400);
 
-    // This check is influenced by ADR backoff. This is OK because (by LoRaWAN design) you either
-    // use ADR and constrain your max app payload according to the default initial DR0, or you
-    // disable ADR for a fixed data rate, with the possibility of using bigger payloads.
     if (!IsPayloadSizeValid(packet->GetSize(), m_dataRate))
     {
-        NS_LOG_ERROR("Application payload exceeding maximum size. Transmission aborted.");
+        NS_LOG_ERROR("Payload too large for DR. Transmission aborted.");
         return;
     }
 
-    // Check if there is a channel suitable for TX (checks data rate & tx power etc.)
+    // ----------------------------------------------------------------------
+    // CHANNEL & DUTY CYCLE CHECKS
+    // ----------------------------------------------------------------------
     if (GetCompatibleTxChannels().empty())
     {
-        NS_LOG_ERROR("No tx channel compatible with current DR/power. Transmission aborted.");
+        NS_LOG_ERROR("No compatible TX channel. Transmission aborted.");
         return;
     }
 
-    // If it is not possible to transmit now because of the duty cycle
-    // or because we are currently in the process of receiving, schedule a tx/retx later
-    if (auto netxTxDelay = GetNextTransmissionDelay(); netxTxDelay.IsStrictlyPositive())
+    if (auto nextTxDelay = GetNextTransmissionDelay(); nextTxDelay.IsStrictlyPositive())
     {
-        PostponeTransmission(netxTxDelay, packet);
+        PostponeTransmission(nextTxDelay, packet);
         m_cannotSendBecauseDutyCycle(packet);
         return;
     }
+///////////////////////////////////////////////////////
+// From here on out, the pkt transmission is assured //
+///////////////////////////////////////////////////////
 
-    ///////////////////////////////////////////////////////
-    // From here on out, the pkt transmission is assured //
-    ///////////////////////////////////////////////////////
+// ---- Burst-MAC Scheduling (Task 4) ----
+if (m_inBurstMac && m_hasSchedule)
+{
+    Time slotLen = GetSlotLength(m_sf);
+    Time frame   = slotLen * m_groupSize;
+    Time now     = Simulator::Now();
 
-    DoSend(packet);
+    double frameSec = frame.GetSeconds();
+    double nowSec   = now.GetSeconds();
+    double frameStartSec =
+        floor(nowSec / frameSec) * frameSec;
+
+    Time frameStart = Seconds(frameStartSec);
+    Time txTime     = frameStart + m_slotIndex * slotLen;
+
+    if (txTime < now)
+        txTime += frame;
+
+    NS_LOG_INFO("Burst-MAC scheduled TX at "
+                << txTime.As(Time::S)
+                << " slot=" << m_slotIndex
+                << " group=" << m_groupSize);
+
+    Simulator::Schedule(txTime - now,
+                        &EndDeviceLorawanMac::DoScheduledSend,
+                        this,
+                        packet);
+    return;
+}
+
+// ---- Normal LoRaWAN immediate TX ----
+DoSend(packet);
+
 }
 
 void
@@ -333,7 +373,67 @@ EndDeviceLorawanMac::IsPayloadSizeValid(uint32_t appPayloadSize, uint8_t dataRat
 void
 EndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
 {
+    NS_LOG_FUNCTION(this << packet);
+
+    NS_LOG_INFO("EndDeviceLorawanMac::Receive called, packet size=" << packet->GetSize());
+
+    // ---- Task 4: Scheduling info from gateway ----
+    ScheduleTag sched;
+    if (packet->PeekPacketTag(sched))
+    {
+        ApplySchedule(sched.GetSlot(), sched.GetGroupSize(), sched.GetSf());
+    }
+
+    // ---- Optional: BurstTag ----
+    BurstTag burstTag;
+    if (packet->PeekPacketTag(burstTag))
+    {
+        if (burstTag.GetBurst())
+        {
+            EnterBurstMode();
+        }
+    }
+
+    // ---- Task 6: Beacon handling (enter burst Class B-like) ----
+    {
+        BeaconTag beacon;
+        if (packet->PeekPacketTag(beacon))
+        {
+            EnterBurstMode();
+            NS_LOG_INFO("Node received beacon → entering burst mode (Class B-like)");
+        }
+    }
+
+    // ---- Pass packet to higher layer ----
+    m_receivedPacket(packet);   // SAFE CALLBACK
 }
+
+void
+EndDeviceLorawanMac::ApplySchedule(uint32_t slot, uint32_t groupSize, uint8_t sf)
+{
+    NS_ASSERT_MSG(groupSize > 0, "Invalid group size received in schedule: " << groupSize);
+    m_slotIndex = slot;
+    m_groupSize = groupSize;
+    m_sf = sf;
+    m_hasSchedule = true;
+    m_inBurstMac = true;
+    NS_LOG_INFO("Node received schedule: slot=" << m_slotIndex
+                 << " group=" << m_groupSize
+                 << " sf=" << unsigned(m_sf));
+}
+
+void
+EndDeviceLorawanMac::EnterBurstMode()
+{
+    m_inBurstMac = true;
+}
+
+Time
+EndDeviceLorawanMac::GetNextTxDelaySafe()
+{
+    return GetNextTransmissionDelay();
+}
+
 
 void
 EndDeviceLorawanMac::FailedReception(Ptr<const Packet> packet)
@@ -462,6 +562,8 @@ EndDeviceLorawanMac::ApplyNecessaryOptions(LorawanMacHeader& macHeader)
 
     macHeader.SetMType(m_mType);
     macHeader.SetMajor(1);
+    // Task 6: set burst bit according to node state
+    macHeader.SetBurst(m_inBurstMac);
 }
 
 void
@@ -609,6 +711,36 @@ EndDeviceLorawanMac::SetDataRate(uint8_t dataRate)
     NS_LOG_FUNCTION(this << unsigned(dataRate));
 
     m_dataRate = dataRate;
+    
+    // ---- Task 4: Update spreading factor when data rate changes ----
+    // Map data rate to spreading factor (EU868)
+    // DR0=SF12, DR1=SF11, DR2=SF10, DR3=SF9, DR4=SF8, DR5=SF7
+    switch (dataRate)
+    {
+        case 0:
+            m_sf = 12;
+            break;
+        case 1:
+            m_sf = 11;
+            break;
+        case 2:
+            m_sf = 10;
+            break;
+        case 3:
+            m_sf = 9;
+            break;
+        case 4:
+            m_sf = 8;
+            break;
+        case 5:
+            m_sf = 7;
+            break;
+        default:
+            m_sf = 7;
+            break;
+    }
+    
+    NS_LOG_DEBUG("SetDataRate: DR=" << unsigned(dataRate) << " -> SF=" << unsigned(m_sf));
 }
 
 uint8_t

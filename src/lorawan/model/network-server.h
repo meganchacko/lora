@@ -114,6 +114,10 @@ class NetworkServer : public Application
                  uint16_t protocol,
                  const Address& sender);
 
+    // Task 6: start periodic beacons (burst mode)
+    void StartBurstBeacons();
+    void SendBeacon();
+
     /**
      * Get the NetworkStatus object of this NetworkServer application.
      *

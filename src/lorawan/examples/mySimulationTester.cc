@@ -47,7 +47,32 @@ int main(int argc, char* argv[])
     cmd.AddValue("radius", "Radius of the deployment area in meters", radiusMeters);
     cmd.Parse(argc, argv);
 
+    // Enable logging for Tasks 2, 3, and 4
     LogComponentEnable("LoraPdrSimulation", LOG_LEVEL_INFO);
+    
+    // Task 2: Burst Detection - Node-side
+    LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
+    LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
+    LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
+    
+    // Task 2: Burst Detection - Gateway-side
+    LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
+    LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
+    
+    // Task 3: Virtual Channels (VC) grouping
+    LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
+    LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
+    
+    // Task 4: Hash-Based Scheduling
+    LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);  // Duplicate for emphasis
+    
+    // Packet/Frame Analysis
+    LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
+    LogComponentEnable("ScheduleTag", LOG_LEVEL_ALL);
+    LogComponentEnable("LoraPhy", LOG_LEVEL_INFO);
 
     LoraPhyHelper phyHelper = LoraPhyHelper();
     LorawanMacHelper macHelper = LorawanMacHelper();
@@ -118,6 +143,20 @@ int main(int argc, char* argv[])
     nsHelper.Install(networkServer);
     forHelper.Install(gateways);
 
+    // Task 6: start beaconing directly on each gateway MAC
+    for (auto gw = gateways.Begin(); gw != gateways.End(); ++gw)
+    {
+        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>((*gw)->GetDevice(0));
+        if (dev)
+        {
+            Ptr<GatewayLorawanMac> gwMac = DynamicCast<GatewayLorawanMac>(dev->GetMac());
+            if (gwMac)
+            {
+                gwMac->StartBeacons(Seconds(10));
+            }
+        }
+    }
+
     PeriodicSenderHelper appHelper = PeriodicSenderHelper();
     appHelper.SetPeriod(Seconds(6));
     appHelper.SetPacketSize(24);
@@ -159,34 +198,6 @@ int main(int argc, char* argv[])
 
     LoraPacketTracker& tracker = helper.GetPacketTracker(); 
     std::cout << tracker.CountMacPacketsGlobally(Seconds(0), appStopTime + Hours(1)) << std::endl;
-
-    //improvement:
-    //1. Gateway will not drop packet
-    //2. Assigning SF based on signal quality
-    //3. Error correction
-
-    //LogComponentEnable("LoraChannel", LOG_LEVEL_INFO);
-    LogComponentEnable("LoraPhy", LOG_LEVEL_INFO);
-    //LogComponentEnable("EndDeviceLoraPhy", LOG_LEVEL_ALL);
-    //LogComponentEnable("GatewayLoraPhy", LOG_LEVEL_ALL);
-    //LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("LorawanMac", LOG_LEVEL_ALL);
-    //LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
-    //LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
-    //LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
-    //LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
-    //LogComponentEnable("LoraHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("LoraPhyHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("LorawanMacHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("OneShotSenderHelper", LOG_LEVEL_ALL);
-    //LogComponentEnable("OneShotSender", LOG_LEVEL_ALL);
-    //LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
-    //LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
-
-    //LogComponentEnableAll(LOG_PREFIX_FUNC);
-    //LogComponentEnableAll(LOG_PREFIX_NODE);
-    //LogComponentEnableAll(LOG_PREFIX_TIME);
 
     return 0;
 }

@@ -1,5 +1,7 @@
 set(source_files
-    model/burst-tag.cc
+  model/burst-tag.cc
+  model/beacon-tag.cc
+    model/schedule-tag.cc
     model/lora-net-device.cc
     model/lorawan-mac.cc
     model/lora-phy.cc
@@ -50,7 +52,8 @@ set(source_files
 )
 
 set(header_files
-    model/lora-net-device.h
+  model/lora-net-device.h
+  model/beacon-tag.h
     model/lorawan-mac.h
     model/lora-phy.h
     model/building-penetration-loss.h
