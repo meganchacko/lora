@@ -88,6 +88,10 @@ MacCommand::GetCIDFromMacCommand(enum MacCommandType commandType)
     case (DL_CHANNEL_ANS): {
         return 0x0A;
     }
+    case (BURST_SLOT_ASSIGN_REQ):
+    case (BURST_SLOT_ASSIGN_ANS): {
+        return 0x0B;
+    }
     }
     return 0;
 }
@@ -1052,6 +1056,91 @@ TxParamSetupAns::Print(std::ostream& os) const
 {
     NS_LOG_FUNCTION(this);
     os << "TxParamSetupAns()";
+}
+
+////////////////////////
+// BurstSlotAssignReq //
+////////////////////////
+
+BurstSlotAssignReq::BurstSlotAssignReq()
+{
+    NS_LOG_FUNCTION(this);
+    m_commandType = BURST_SLOT_ASSIGN_REQ;
+    m_serializedSize = 3; // CID + 2 bytes slot index
+}
+
+BurstSlotAssignReq::BurstSlotAssignReq(uint16_t slotIndex)
+    : m_slotIndex(slotIndex)
+{
+    NS_LOG_FUNCTION(this << slotIndex);
+    m_commandType = BURST_SLOT_ASSIGN_REQ;
+    m_serializedSize = 3;
+}
+
+void
+BurstSlotAssignReq::Serialize(Buffer::Iterator& start) const
+{
+    NS_LOG_FUNCTION(this);
+    start.WriteU8(GetCIDFromMacCommand(m_commandType)); // Write the CID
+    start.WriteU16(m_slotIndex);                        // Write the slot index
+}
+
+uint8_t
+BurstSlotAssignReq::Deserialize(Buffer::Iterator& start)
+{
+    NS_LOG_FUNCTION(this);
+    start.ReadU8(); // Consume the CID
+    m_slotIndex = start.ReadU16();
+    return m_serializedSize;
+}
+
+void
+BurstSlotAssignReq::Print(std::ostream& os) const
+{
+    NS_LOG_FUNCTION(this);
+    os << "BurstSlotAssignReq(";
+    os << "SlotIndex=" << unsigned(m_slotIndex);
+    os << ")";
+}
+
+uint16_t
+BurstSlotAssignReq::GetSlotIndex() const
+{
+    NS_LOG_FUNCTION(this);
+    return m_slotIndex;
+}
+
+////////////////////////
+// BurstSlotAssignAns //
+////////////////////////
+
+BurstSlotAssignAns::BurstSlotAssignAns()
+{
+    NS_LOG_FUNCTION(this);
+    m_commandType = BURST_SLOT_ASSIGN_ANS;
+    m_serializedSize = 1; // Just CID
+}
+
+void
+BurstSlotAssignAns::Serialize(Buffer::Iterator& start) const
+{
+    NS_LOG_FUNCTION(this);
+    start.WriteU8(GetCIDFromMacCommand(m_commandType)); // Write the CID
+}
+
+uint8_t
+BurstSlotAssignAns::Deserialize(Buffer::Iterator& start)
+{
+    NS_LOG_FUNCTION(this);
+    start.ReadU8(); // Consume the CID
+    return m_serializedSize;
+}
+
+void
+BurstSlotAssignAns::Print(std::ostream& os) const
+{
+    NS_LOG_FUNCTION(this);
+    os << "BurstSlotAssignAns()";
 }
 
 } // namespace lorawan

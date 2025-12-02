@@ -41,7 +41,9 @@ enum MacCommandType
     TX_PARAM_SETUP_REQ,
     TX_PARAM_SETUP_ANS,
     DL_CHANNEL_REQ,
-    DL_CHANNEL_ANS
+    DL_CHANNEL_ANS,
+    BURST_SLOT_ASSIGN_REQ,
+    BURST_SLOT_ASSIGN_ANS
 };
 
 /**
@@ -745,6 +747,56 @@ class DlChannelAns : public MacCommand
 
   private:
 };
+
+/**
+ * @ingroup lorawan
+ *
+ * Implementation of the BurstSlotAssignReq LoRaWAN MAC command.
+ *
+ * This command assigns a specific slot index to an end device for burst transmission.
+ */
+class BurstSlotAssignReq : public MacCommand
+{
+  public:
+    BurstSlotAssignReq(); //!< Default constructor
+
+    /**
+     * Constructor providing initialization of all parameters.
+     *
+     * @param slotIndex The index of the slot assigned to the device.
+     */
+    BurstSlotAssignReq(uint16_t slotIndex);
+
+    void Serialize(Buffer::Iterator& start) const override;
+    uint8_t Deserialize(Buffer::Iterator& start) override;
+    void Print(std::ostream& os) const override;
+
+    /**
+     * Get the slot index contained in this MAC command.
+     *
+     * @return The slot index.
+     */
+    uint16_t GetSlotIndex() const;
+
+  private:
+    uint16_t m_slotIndex; //!< The assigned slot index
+};
+
+/**
+ * @ingroup lorawan
+ *
+ * Implementation of the BurstSlotAssignAns LoRaWAN MAC command.
+ */
+class BurstSlotAssignAns : public MacCommand
+{
+  public:
+    BurstSlotAssignAns(); //!< Default constructor
+
+    void Serialize(Buffer::Iterator& start) const override;
+    uint8_t Deserialize(Buffer::Iterator& start) override;
+    void Print(std::ostream& os) const override;
+};
+
 } // namespace lorawan
 
 } // namespace ns3

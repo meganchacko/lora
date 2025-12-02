@@ -135,11 +135,21 @@ class NetworkStatus : public Object
      */
     int CountEndDevices();
 
+    // --- Task 3 & 4: VC Grouping & Scheduling ---
+    void AddNodeToVc(LoraDeviceAddress address, uint32_t freq, uint8_t sf);
+    std::vector<LoraDeviceAddress> GetVcGroup(uint32_t freq, uint8_t sf);
+    uint16_t AssignBurstSlot(LoraDeviceAddress address, uint32_t freq, uint8_t sf);
+
   public:
     std::map<LoraDeviceAddress, Ptr<EndDeviceStatus>>
         m_endDeviceStatuses; //!< Map tracking the state of devices connected to this network server
     std::map<Address, Ptr<GatewayStatus>>
         m_gatewayStatuses; //!< Map tracking the state of gateways connected to this network server
+
+    // Map (freq, sf) -> List of nodes
+    std::map<std::pair<uint32_t, uint8_t>, std::vector<LoraDeviceAddress>> m_vcGroups;
+    // Map (freq, sf) -> Map(slot_index -> node_address) to track occupied slots
+    std::map<std::pair<uint32_t, uint8_t>, std::map<uint16_t, LoraDeviceAddress>> m_vcSlots;
 };
 
 } // namespace lorawan

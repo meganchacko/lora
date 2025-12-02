@@ -53,7 +53,7 @@ PeriodicSender::PeriodicSender()
       m_mac(nullptr),
       m_sendEvent(),
       m_lastTxTime(Seconds(0)),
-      m_burstThreshold(Seconds(10)),   // threshold for "high rate"
+      m_burstThreshold(Seconds(0.1)),   // threshold for "high rate"
       m_isBurst(false)
 {
     NS_LOG_FUNCTION_NOARGS();

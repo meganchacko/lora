@@ -15,6 +15,9 @@
 #include "lorawan-mac-header.h"
 #include "mac-command.h"
 #include "network-status.h"
+#include "lora-tag.h"
+#include "burst-tag.h"
+#include "lora-utils.h"
 
 #include "ns3/log.h"
 #include "ns3/net-device.h"
@@ -135,6 +138,54 @@ NetworkServer::Receive(Ptr<NetDevice> device,
 
     m_receivedPacket(packet);
 
+    // --- Task 3: Grouping into VCs ---
+    Ptr<Packet> packetCopy = packet->Copy();
+    LorawanMacHeader macHdr;
+    LoraFrameHeader frameHdr;
+    packetCopy->PeekHeader(macHdr);
+    packetCopy->RemoveHeader(macHdr);
+    packetCopy->PeekHeader(frameHdr);
+    LoraDeviceAddress edAddr = frameHdr.GetAddress();
+
+    uint32_t freq = 0;
+    uint8_t sf = 0;
+    LoraTag loraTag;
+    if (packetCopy->PeekPacketTag(loraTag))
+    {
+        freq = loraTag.GetFrequency();
+        uint8_t dr = loraTag.GetDataRate();
+        // This logic is typically in LorawanMac, but since NS doesn't have a
+        // single MAC instance, we replicate it here. This assumes a static mapping
+        // based on common regional parameters (e.g., EU868). A more robust
+        // implementation would have the NS query regional parameters.
+        if (dr <= 5)
+        {
+            sf = 12 - dr;
+        }
+    }
+
+    BurstTag burstTag;
+    bool isBurst = false;
+    if (packetCopy->PeekPacketTag(burstTag))
+    {
+        isBurst = burstTag.GetBurst();
+    }
+
+    if (freq != 0 && sf != 0)
+    {
+        std::pair<uint32_t, uint8_t> vcKey = std::make_pair(freq, sf);
+
+        // Update burst count
+        if (isBurst)
+        {
+            m_burstCountPerVc[vcKey]++;
+        }
+
+        // Update VC in status
+        m_status->AddNodeToVc(edAddr, freq, sf);
+    }
+    // --- End Task 3 ---
+
     // pass to scheduler + status + controller
     m_scheduler->OnReceivedPacket(packet);
     m_status->OnReceivedPacket(packet, sender);
@@ -153,6 +204,23 @@ Ptr<NetworkStatus>
 NetworkServer::GetNetworkStatus()
 {
     return m_status;
+}
+
+uint32_t
+NetworkServer::GetBurstCountForVc(uint32_t freq, uint8_t sf) const
+{
+    auto it = m_burstCountPerVc.find({freq, sf});
+    if (it != m_burstCountPerVc.end())
+    {
+        return it->second;
+    }
+    return 0;
+}
+
+const std::map<std::pair<uint32_t, uint8_t>, std::vector<LoraDeviceAddress>>&
+NetworkServer::GetVcGroups() const
+{
+    return m_status->m_vcGroups;
 }
 
 } // namespace lorawan

@@ -27,6 +27,7 @@
 
 #include <map>
 #include <utility>
+#include <vector>
 
 namespace ns3
 {
@@ -126,6 +127,12 @@ class NetworkServer : public Application
      * VC is defined by (frequency, SF).
      */
     uint32_t GetBurstCountForVc(uint32_t freq, uint8_t sf) const;
+
+    /**
+     * Get the current VC groups.
+     */
+    const std::map<std::pair<uint32_t, uint8_t>, std::vector<LoraDeviceAddress>>& GetVcGroups()
+        const;
 
   protected:
     Ptr<NetworkStatus> m_status;         //!< Ptr to the NetworkStatus object.

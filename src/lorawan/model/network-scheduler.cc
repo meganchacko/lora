@@ -1,4 +1,6 @@
 #include "network-scheduler.h"
+#include "mac-command.h"
+#include "ns3/log.h"
 
 namespace ns3
 {
@@ -111,10 +113,38 @@ NetworkScheduler::OnReceiveWindowOpportunity(LoraDeviceAddress deviceAddress, in
 
         NS_LOG_DEBUG("Found available gateway with address: " << gwAddress);
 
-        m_controller->BeforeSendingReply(m_status->GetEndDeviceStatus(deviceAddress));
+        auto edStatus = m_status->GetEndDeviceStatus(deviceAddress);
+        if (!edStatus)
+        {
+            NS_LOG_WARN("EndDeviceStatus not found for " << deviceAddress << ", skipping reply.");
+            return;
+        }
+
+        m_controller->BeforeSendingReply(edStatus);
 
         // Check whether this device needs a response by querying m_status
         bool needsReply = m_status->NeedsReply(deviceAddress);
+
+        // --- Task 4 & 5: Scheduling and Collision Resolution ---
+        // Only perform scheduling if we have valid last packet info
+        auto pktInfo = edStatus->GetLastReceivedPacketInfo();
+        if (pktInfo.packet != nullptr)
+        {
+            // Check if this node is part of a Burst-MAC VC
+            // We can try to assign a slot. If it's not in a VC, it will just be added or ignored based on implementation
+            // But since we only care about burst nodes, we should check if it's in m_vcGroups
+            // For now, we'll optimistically assign if it matches our criteria.
+            // Ideally, we should check the burst bit from the packet tags, but that's in the packet.
+            // Let's assume all nodes tracked in VCs are candidates.
+
+            uint16_t assignedSlot = m_status->AssignBurstSlot(deviceAddress, pktInfo.frequencyHz, pktInfo.sf);
+            
+            // Piggyback the assignment (Task 5)
+            Ptr<BurstSlotAssignReq> cmd = Create<BurstSlotAssignReq>(assignedSlot);
+            edStatus->AddMACCommand(cmd);
+            needsReply = true; // Force reply to send the command
+        }
+        // --- End Task 4 & 5 ---
 
         if (needsReply)
         {

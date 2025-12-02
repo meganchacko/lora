@@ -235,5 +235,98 @@ NetworkStatus::CountEndDevices()
 
     return m_endDeviceStatuses.size();
 }
+
+// --- Task 3 & 4 Implementation ---
+
+void
+NetworkStatus::AddNodeToVc(LoraDeviceAddress address, uint32_t freq, uint8_t sf)
+{
+    std::pair<uint32_t, uint8_t> key = {freq, sf};
+    std::vector<LoraDeviceAddress>& group = m_vcGroups[key];
+
+    // Add if not present
+    if (std::find(group.begin(), group.end(), address) == group.end())
+    {
+        group.push_back(address);
+        NS_LOG_INFO("NetworkStatus: Node " << address << " added to VC(" << freq << ", "
+                                           << unsigned(sf) << "). Size: " << group.size());
+    }
+}
+
+std::vector<LoraDeviceAddress>
+NetworkStatus::GetVcGroup(uint32_t freq, uint8_t sf)
+{
+    std::pair<uint32_t, uint8_t> key = {freq, sf};
+    if (m_vcGroups.find(key) != m_vcGroups.end())
+    {
+        return m_vcGroups[key];
+    }
+    return std::vector<LoraDeviceAddress>();
+}
+
+uint16_t
+NetworkStatus::AssignBurstSlot(LoraDeviceAddress address, uint32_t freq, uint8_t sf)
+{
+    std::pair<uint32_t, uint8_t> key = {freq, sf};
+    std::vector<LoraDeviceAddress>& group = m_vcGroups[key];
+
+    if (group.empty())
+    {
+        // Should not happen if added first
+        AddNodeToVc(address, freq, sf);
+    }
+
+    uint32_t groupSize = group.size();
+    uint32_t nodeId = address.GetNwkAddr(); // Simplified ID usage
+    uint16_t hashSlot = nodeId % groupSize;
+
+    // Collision Resolution (Task 5)
+    std::map<uint16_t, LoraDeviceAddress>& slots = m_vcSlots[key];
+
+    // Check if slot is occupied by SOMEONE ELSE
+    uint16_t assignedSlot = hashSlot;
+    bool found = false;
+
+    // Linear probing for free slot
+    for (uint32_t i = 0; i < groupSize; ++i)
+    {
+        uint16_t probe = (hashSlot + i) % groupSize;
+        if (slots.find(probe) == slots.end())
+        {
+            // Empty slot found
+            assignedSlot = probe;
+            slots[assignedSlot] = address;
+            found = true;
+            break;
+        }
+        else if (slots[probe] == address)
+        {
+            // Already assigned to us
+            assignedSlot = probe;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+    {
+        // Worst case, map full (shouldn't happen if size matches)
+        NS_LOG_WARN("All slots full for VC!");
+        assignedSlot = hashSlot; // Default back to hash
+    }
+
+    if (assignedSlot != hashSlot)
+    {
+        NS_LOG_INFO("Collision detected for Node " << address << ". Hash: " << hashSlot
+                                                   << ", Reassigned: " << assignedSlot);
+    }
+    else
+    {
+        NS_LOG_INFO("Slot assigned for Node " << address << ": " << assignedSlot);
+    }
+
+    return assignedSlot;
+}
+
 } // namespace lorawan
 } // namespace ns3

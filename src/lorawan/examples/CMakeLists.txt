@@ -7,6 +7,7 @@ set(base_examples
     aloha-throughput
     parallel-reception-example
     frame-counter-update
+    my-network
 )
 
 foreach(
