@@ -43,6 +43,10 @@ class PeriodicSender : public Application
     void SetPacketSizeRandomVariable(Ptr<RandomVariableStream> rv);
     void SetPacketSize(uint8_t size);
 
+    // Force this sender to always mark packets as burst
+    void SetForceBurst(bool force);
+    bool GetForceBurst() const;
+
   protected:
     void StartApplication() override;
     void StopApplication() override;
@@ -64,6 +68,7 @@ class PeriodicSender : public Application
     Time m_lastTxTime;                 //!< Time of last transmission
     Time m_burstThreshold;             //!< Threshold for "burst" mode
     bool m_isBurst;                    //!< Whether we are currently in burst
+    bool m_forceBurst;                 //!< Force burst regardless of timing
 };
 
 } // namespace lorawan

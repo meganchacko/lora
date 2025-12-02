@@ -54,7 +54,8 @@ PeriodicSender::PeriodicSender()
       m_sendEvent(),
       m_lastTxTime(Seconds(0)),
       m_burstThreshold(Seconds(10)),   // threshold for "high rate"
-      m_isBurst(false)
+      m_isBurst(false),
+      m_forceBurst(false)
 {
     NS_LOG_FUNCTION_NOARGS();
 }
@@ -100,6 +101,18 @@ PeriodicSender::SetPacketSize(uint8_t size)
 }
 
 void
+PeriodicSender::SetForceBurst(bool force)
+{
+    m_forceBurst = force;
+}
+
+bool
+PeriodicSender::GetForceBurst() const
+{
+    return m_forceBurst;
+}
+
+void
 PeriodicSender::SendPacket()
 {
     NS_LOG_FUNCTION(this);
@@ -133,6 +146,12 @@ PeriodicSender::SendPacket()
         }
     }
     m_lastTxTime = now;
+
+    // Forced burst overrides timing-based detection
+    if (m_forceBurst)
+    {
+        m_isBurst = true;
+    }
 
     // Attach the burst flag as a packet tag
     BurstTag tag;

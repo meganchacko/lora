@@ -9,28 +9,42 @@
 #include "ns3/network-server-helper.h"
 #include "ns3/forwarder-helper.h"
 #include "ns3/periodic-sender-helper.h"
+#include "ns3/basic-energy-source-helper.h"
+#include "ns3/energy-source-container.h"
+#include "ns3/lora-radio-energy-model-helper.h"
+#include "ns3/lora-radio-energy-model.h"
 
 #include <iostream>
 #include <vector>
+#include <unordered_map>
 
 using namespace ns3;
 using namespace lorawan;
 
 NS_LOG_COMPONENT_DEFINE("LoraPdrSimulation");
 
-uint64_t packetsSent = 0;
-uint64_t packetsReceived = 0;
+// Metrics tracking
+static uint64_t g_sent = 0;
+static uint64_t g_recv = 0;
+static std::unordered_map<uint64_t, ns3::Time> g_txTime;
+static std::vector<double> g_latencies;
 
-void OnTransmissionCallback(Ptr<const Packet> packet, uint32_t senderNodeId)
+static void OnStartSending(Ptr<const Packet> pkt, uint32_t senderId)
 {
-    NS_LOG_INFO("Packet sent by node " << senderNodeId);
-    packetsSent++;
+    g_sent++;
+    g_txTime[pkt->GetUid()] = Simulator::Now();
 }
 
-void OnPacketReceptionCallback(Ptr<const Packet> packet, uint32_t receiverNodeId)
+static void OnGatewayReceived(Ptr<const Packet> pkt, uint32_t gwId)
 {
-    NS_LOG_INFO("Packet received by gateway " << receiverNodeId);
-    packetsReceived++;
+    g_recv++;
+    auto it = g_txTime.find(pkt->GetUid());
+    if (it != g_txTime.end())
+    {
+        double ms = (Simulator::Now() - it->second).GetMilliSeconds();
+        g_latencies.push_back(ms);
+        g_txTime.erase(it);
+    }
 }
 
 int main(int argc, char* argv[])
@@ -40,39 +54,52 @@ int main(int argc, char* argv[])
     double radiusMeters = 2000;
     double simulationTimeSeconds = 70.0;
     Time appStopTime = Seconds(simulationTimeSeconds);
+    double burstPct = 0.2; // default 20% of nodes forced to burst
+    double burstPeriodSecs = 3.0; // default faster period for burst nodes
+
+    bool verboseLogs = false;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("nNodes", "Number of end devices", nNodes);
     cmd.AddValue("x", "Number of gateways", nGateways);
     cmd.AddValue("radius", "Radius of the deployment area in meters", radiusMeters);
+    cmd.AddValue("verbose", "Enable verbose logging (slow for >500 nodes)", verboseLogs);
+    cmd.AddValue("burstPct", "Fraction [0..1] of nodes forced into burst", burstPct);
+    cmd.AddValue("burstPeriod", "Period (s) used by burst nodes", burstPeriodSecs);
     cmd.Parse(argc, argv);
 
-    // Enable logging for Tasks 2, 3, and 4
-    LogComponentEnable("LoraPdrSimulation", LOG_LEVEL_INFO);
-    
-    // Task 2: Burst Detection - Node-side
-    LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
-    LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
-    LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
-    
-    // Task 2: Burst Detection - Gateway-side
-    LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
-    LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
-    LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
-    LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
-    
-    // Task 3: Virtual Channels (VC) grouping
-    LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
-    LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
-    
-    // Task 4: Hash-Based Scheduling
-    LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);  // Duplicate for emphasis
-    
-    // Packet/Frame Analysis
-    LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
-    LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
-    LogComponentEnable("ScheduleTag", LOG_LEVEL_ALL);
-    LogComponentEnable("LoraPhy", LOG_LEVEL_INFO);
+    // No logging by default for maximum performance
+    // Only enable when --verbose=1 is passed
+    if (verboseLogs)
+    {
+        LogComponentEnable("LoraPdrSimulation", LOG_LEVEL_INFO);
+        
+        // Task 2: Burst Detection - Node-side
+        LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
+        LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
+        LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
+        
+        // Task 2: Burst Detection - Gateway-side
+        LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
+        LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
+        LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
+        LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
+        
+        // Task 3: Virtual Channels (VC) grouping
+        LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
+        LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
+        
+        // Task 4: Hash-Based Scheduling
+        LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);  // Duplicate for emphasis
+        
+        // Packet/Frame Analysis
+        LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
+        LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
+        LogComponentEnable("ScheduleTag", LOG_LEVEL_ALL);
+        LogComponentEnable("LoraPhy", LOG_LEVEL_INFO);
+        // Energy model debug (to confirm state changes and accumulation)
+        LogComponentEnable("LoraRadioEnergyModel", LOG_LEVEL_DEBUG);
+    }
 
     LoraPhyHelper phyHelper = LoraPhyHelper();
     LorawanMacHelper macHelper = LorawanMacHelper();
@@ -123,6 +150,24 @@ int main(int argc, char* argv[])
 
     LorawanMacHelper::SetSpreadingFactorsUp(endDevices, gateways, channel);
 
+    // Install energy sources on end devices
+    BasicEnergySourceHelper energy;
+    energy.Set("BasicEnergySourceInitialEnergyJ", DoubleValue(10000.0));
+    EnergySourceContainer sources = energy.Install(endDevices);
+
+    // Attach LoRa radio energy models with realistic current values
+    LoraRadioEnergyModelHelper loraEnergy;
+    loraEnergy.Set("StandbyCurrentA", DoubleValue(0.0014));      // 1.4 mA standby
+    loraEnergy.Set("TxCurrentA", DoubleValue(0.028));            // 28 mA transmit
+    loraEnergy.Set("RxCurrentA", DoubleValue(0.0112));           // 11.2 mA receive
+    loraEnergy.Set("SleepCurrentA", DoubleValue(0.0000015));     // 1.5 µA sleep
+    
+    for (uint32_t i = 0; i < endDevices.GetN(); ++i)
+    {
+        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(endDevices.Get(i)->GetDevice(0));
+        loraEnergy.Install(dev, sources.Get(i));
+    }
+
     NetworkServerHelper nsHelper = NetworkServerHelper();
     ForwarderHelper forHelper = ForwarderHelper();
     PointToPointHelper p2p;
@@ -165,39 +210,75 @@ int main(int argc, char* argv[])
     appContainer.Start(Time(0));
     appContainer.Stop(appStopTime);
 
-    /*for (auto node = endDevices.Begin(); node != endDevices.End(); node++)
+    // Force a percentage of nodes into burst mode by toggling their PeriodicSender
+    uint32_t burstCount = std::min<uint32_t>(endDevices.GetN(), (uint32_t)std::round(burstPct * endDevices.GetN()));
+    for (uint32_t i = 0; i < burstCount && i < appContainer.GetN(); ++i)
     {
-        DynamicCast<LoraNetDevice>((*node)->GetDevice(0))
-            ->GetPhy()
-            ->TraceConnectWithoutContext("StartSending", MakeCallback(OnTransmissionCallback));
+        Ptr<Application> app = appContainer.Get(i);
+        Ptr<lorawan::PeriodicSender> ps = DynamicCast<lorawan::PeriodicSender>(app);
+        if (ps)
+        {
+            ps->SetForceBurst(true);
+            ps->SetInterval(Seconds(burstPeriodSecs));
+        }
     }
 
-    for (auto node = gateways.Begin(); node != gateways.End(); node++)
+    // Connect traces for metrics collection
+    for (auto node = endDevices.Begin(); node != endDevices.End(); ++node)
     {
         DynamicCast<LoraNetDevice>((*node)->GetDevice(0))
             ->GetPhy()
-            ->TraceConnectWithoutContext("ReceivedPacket", MakeCallback(OnPacketReceptionCallback));
-    }*/
+            ->TraceConnectWithoutContext("StartSending", MakeCallback(&OnStartSending));
+    }
+
+    for (auto node = gateways.Begin(); node != gateways.End(); ++node)
+    {
+        DynamicCast<LoraNetDevice>((*node)->GetDevice(0))
+            ->GetPhy()
+            ->TraceConnectWithoutContext("ReceivedPacket", MakeCallback(&OnGatewayReceived));
+    }
 
     Simulator::Stop(appStopTime + Hours(1));
-    NS_LOG_INFO("Running simulation...");
     Simulator::Run();
+
+    // Compute metrics (do this BEFORE Destroy to keep objects alive)
+    double prr = (g_sent > 0) ? (double)g_recv / (double)g_sent : 0.0;
+    
+    double avgLatency = 0.0;
+    if (!g_latencies.empty())
+    {
+        double sum = 0.0;
+        for (double v : g_latencies) sum += v;
+        avgLatency = sum / g_latencies.size();
+    }
+    
+    double totalEnergyJ = 0.0;
+    for (uint32_t i = 0; i < endDevices.GetN(); ++i)
+    {
+        auto src = sources.Get(i);
+        DeviceEnergyModelContainer models = src->FindDeviceEnergyModels("ns3::LoraRadioEnergyModel");
+        for (auto it = models.Begin(); it != models.End(); ++it)
+        {
+            auto dem = DynamicCast<LoraRadioEnergyModel>(*it);
+            if (dem)
+            {
+                totalEnergyJ += dem->GetTotalEnergyConsumption();
+            }
+        }
+    }
+    double avgEnergyPerPacketJ = (g_sent > 0) ? (totalEnergyJ / (double)g_sent) : 0.0;
+
     Simulator::Destroy();
 
-    /*double pdr = 0.0;
-    if (packetsSent > 0)
-    {
-        pdr = (double)packetsReceived / packetsSent;
-    }
-
-    std::cout << "\n--- Simulation Results ---" << std::endl;
-    std::cout << "Total packets sent: " << packetsSent << std::endl;
-    std::cout << "Total packets received: " << packetsReceived << std::endl;
-    std::cout << "Packet Delivery Ratio (PDR): " << pdr * 100.0 << "%" << std::endl;
-    std::cout << "--------------------------" << std::endl;*/
-
-    LoraPacketTracker& tracker = helper.GetPacketTracker(); 
-    std::cout << tracker.CountMacPacketsGlobally(Seconds(0), appStopTime + Hours(1)) << std::endl;
+    // Print results
+    std::cout << "\n========== Simulation Results ==========\n";
+    std::cout << "Packets sent: " << g_sent << "\n";
+    std::cout << "Packets received: " << g_recv << "\n";
+    std::cout << "Packet Reception Ratio (PRR): " << (prr * 100.0) << "%\n";
+    std::cout << "Average latency (ms): " << avgLatency << "\n";
+    std::cout << "Total radio energy (J): " << totalEnergyJ << "\n";
+    std::cout << "Avg energy per packet (J): " << avgEnergyPerPacketJ << "\n";
+    std::cout << "========================================\n";
 
     return 0;
 }
