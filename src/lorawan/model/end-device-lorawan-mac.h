@@ -239,6 +239,30 @@ class EndDeviceLorawanMac : public LorawanMac
     void SetMType(LorawanMacHeader::MType mType);
 
     /**
+     * Set the number of slots per scheduling epoch (overrides m_groupSize).
+     *
+     * @param slotCount Number of slots in each epoch.
+     */
+    void SetSlotCount(uint32_t slotCount);
+
+    /**
+     * Public wrapper to apply a schedule to the device.
+     * Enables burst scheduling and sets slot index, group size, and SF.
+     *
+     * @param slot Slot index within the epoch.
+     * @param groupSize Number of slots in the epoch.
+     * @param sf Spreading factor (e.g., 7 for DR5).
+     */
+    void SetSchedule(uint32_t slot, uint32_t groupSize, uint8_t sf);
+
+    /**
+     * Set how many slots per epoch this device should use.
+     * When greater than 1, the device will transmit in multiple
+     * evenly spaced slots within the epoch.
+     */
+    void SetSlotMultiplier(uint32_t mult);
+
+    /**
      * Get the message type to send when the Send method is called.
      *
      * @return The message type.
@@ -421,8 +445,10 @@ class EndDeviceLorawanMac : public LorawanMac
     bool m_hasSchedule = false;  // true after receiving ScheduleTag
 
     uint32_t m_slotIndex = 0;    // assigned hash slot
-    uint32_t m_groupSize = 1;    // number of nodes in this VC
+    uint32_t m_groupSize = 1;    // number of slots in the epoch
     uint8_t  m_sf = 7;           // spreading factor (needed for slot length)
+    Time     m_epochStart = Seconds(0); // start of current epoch from beacon
+    uint32_t m_slotMultiplier = 1; // number of slots per epoch to use (>=1)
 
     // Inline helper to compute slot length from SF (Task 4)
     Time GetSlotLength(uint8_t sf)

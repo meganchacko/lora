@@ -234,20 +234,28 @@ if (m_inBurstMac && m_hasSchedule)
         floor(nowSec / frameSec) * frameSec;
 
     Time frameStart = Seconds(frameStartSec);
-    Time txTime     = frameStart + m_slotIndex * slotLen;
 
-    if (txTime < now)
-        txTime += frame;
+    // Schedule in m_slotMultiplier evenly spaced slots within the epoch
+    uint32_t mult = std::max<uint32_t>(1, m_slotMultiplier);
+    uint32_t step = std::max<uint32_t>(1, m_groupSize / mult);
+    for (uint32_t k = 0; k < mult; ++k)
+    {
+        uint32_t slot = (m_slotIndex + k * step) % m_groupSize;
+        Time txTime   = frameStart + slot * slotLen;
+        if (txTime < now)
+            txTime += frame;
 
-    NS_LOG_INFO("Burst-MAC scheduled TX at "
-                << txTime.As(Time::S)
-                << " slot=" << m_slotIndex
-                << " group=" << m_groupSize);
+        NS_LOG_INFO("Burst-MAC scheduled TX at "
+                    << txTime.As(Time::S)
+                    << " slot=" << slot
+                    << " group=" << m_groupSize
+                    << " mult=" << m_slotMultiplier);
 
-    Simulator::Schedule(txTime - now,
-                        &EndDeviceLorawanMac::DoScheduledSend,
-                        this,
-                        packet);
+        Simulator::Schedule(txTime - now,
+                            &EndDeviceLorawanMac::DoScheduledSend,
+                            this,
+                            packet);
+    }
     return;
 }
 
@@ -400,7 +408,10 @@ EndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
         if (packet->PeekPacketTag(beacon))
         {
             EnterBurstMode();
-            NS_LOG_INFO("Node received beacon → entering burst mode (Class B-like)");
+                // Align epoch start to beacon timestamp
+                m_epochStart = MilliSeconds(beacon.GetEpoch());
+                NS_LOG_INFO("Node received beacon → entering burst mode (Class B-like), epoch="
+                            << beacon.GetEpoch());
         }
     }
 
@@ -420,6 +431,27 @@ EndDeviceLorawanMac::ApplySchedule(uint32_t slot, uint32_t groupSize, uint8_t sf
     NS_LOG_INFO("Node received schedule: slot=" << m_slotIndex
                  << " group=" << m_groupSize
                  << " sf=" << unsigned(m_sf));
+}
+
+void
+EndDeviceLorawanMac::SetSlotCount(uint32_t slotCount)
+{
+    NS_LOG_FUNCTION(this << slotCount);
+    m_groupSize = slotCount;
+    NS_LOG_INFO("Set slot count (epoch size) to " << m_groupSize);
+}
+
+void
+EndDeviceLorawanMac::SetSchedule(uint32_t slot, uint32_t groupSize, uint8_t sf)
+{
+    ApplySchedule(slot, groupSize, sf);
+}
+
+void
+EndDeviceLorawanMac::SetSlotMultiplier(uint32_t mult)
+{
+    m_slotMultiplier = std::max<uint32_t>(1, mult);
+    NS_LOG_INFO("Set slot multiplier to " << m_slotMultiplier);
 }
 
 void
@@ -550,7 +582,6 @@ EndDeviceLorawanMac::ApplyNecessaryOptions(LoraFrameHeader& frameHeader)
     {
         NS_LOG_INFO("Applying a MAC Command of CID "
                     << unsigned(MacCommand::GetCIDFromMacCommand(command->GetCommandType())));
-
         frameHeader.AddCommand(command);
     }
 }
