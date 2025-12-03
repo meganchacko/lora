@@ -176,6 +176,8 @@ class LorawanMacHelper
                                                                  NodeContainer gateways,
                                                                  std::vector<double> distribution);
 
+    static void SetupVirtualChannels(NodeContainer endDevices);
+
   private:
     /**
      * Perform region-specific configurations for the 868 MHz EU band.

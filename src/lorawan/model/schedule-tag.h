@@ -16,20 +16,16 @@ public:
     ScheduleTag();
     virtual ~ScheduleTag();
 
-    // Required TypeId system
     static TypeId GetTypeId();
     virtual TypeId GetInstanceTypeId() const override;
 
-    // Serialization
     virtual uint32_t GetSerializedSize() const override;
     virtual void Serialize(TagBuffer buf) const override;
     virtual void Deserialize(TagBuffer buf) override;
     virtual void Print(std::ostream &os) const override;
 
-    // Set schedule parameters
     void Set(uint32_t slot, uint32_t groupSize, uint8_t sf);
 
-    // Accessors
     uint32_t GetSlot() const;
     uint32_t GetGroupSize() const;
     uint8_t GetSf() const;

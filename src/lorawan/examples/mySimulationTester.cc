@@ -75,36 +75,24 @@ int main(int argc, char* argv[])
     cmd.AddValue("noPacketTracking", "Disable ns-3 LoRa packet tracking to speed runs", disablePacketTracking);
     cmd.Parse(argc, argv);
 
-    // No logging by default for maximum performance
-    // Only enable when --verbose=1 is passed
+    
     if (verboseLogs)
     {
         LogComponentEnable("LoraPdrSimulation", LOG_LEVEL_INFO);
-        
-        // Task 2: Burst Detection - Node-side
         LogComponentEnable("PeriodicSender", LOG_LEVEL_ALL);
         LogComponentEnable("EndDeviceLorawanMac", LOG_LEVEL_ALL);
         LogComponentEnable("ClassAEndDeviceLorawanMac", LOG_LEVEL_ALL);
-        
-        // Task 2: Burst Detection - Gateway-side
         LogComponentEnable("GatewayLorawanMac", LOG_LEVEL_ALL);
         LogComponentEnable("LoraInterferenceHelper", LOG_LEVEL_ALL);
         LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
         LogComponentEnable("NetworkController", LOG_LEVEL_ALL);
-        
-        // Task 3: Virtual Channels (VC) grouping
         LogComponentEnable("LogicalLoraChannelHelper", LOG_LEVEL_ALL);
         LogComponentEnable("LogicalLoraChannel", LOG_LEVEL_ALL);
-        
-        // Task 4: Hash-Based Scheduling
-        LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);  // Duplicate for emphasis
-        
-        // Packet/Frame Analysis
+        LogComponentEnable("NetworkScheduler", LOG_LEVEL_ALL);
         LogComponentEnable("LorawanMacHeader", LOG_LEVEL_ALL);
         LogComponentEnable("LoraFrameHeader", LOG_LEVEL_ALL);
         LogComponentEnable("ScheduleTag", LOG_LEVEL_ALL);
         LogComponentEnable("LoraPhy", LOG_LEVEL_INFO);
-        // Energy model debug (to confirm state changes and accumulation)
         LogComponentEnable("LoraRadioEnergyModel", LOG_LEVEL_DEBUG);
     }
 
@@ -161,30 +149,19 @@ int main(int argc, char* argv[])
     helper.Install(phyHelper, macHelper, gateways);
 
     LorawanMacHelper::SetSpreadingFactorsUp(endDevices, gateways, channel);
-
-    // Simplified VC handling: keep all end devices at the fastest DR (DR5)
-    // to avoid airtime inflation. Use vcCount to control the number of slots per epoch.
-    // Assign each node a slot index in round-robin fashion to enable scheduling.
-    for (uint32_t i = 0; i < endDevices.GetN(); ++i)
-    {
-        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(endDevices.Get(i)->GetDevice(0));
-        Ptr<EndDeviceLorawanMac> mac = DynamicCast<EndDeviceLorawanMac>(dev->GetMac());
-        mac->SetDataRate(5);
-        uint32_t slotIndex = i % vcCount;
-        mac->SetSchedule(slotIndex, vcCount, 7); // DR5 → SF7
-    }
+    
+    LorawanMacHelper::SetupVirtualChannels(endDevices);
 
     // Install energy sources on end devices
     BasicEnergySourceHelper energy;
     energy.Set("BasicEnergySourceInitialEnergyJ", DoubleValue(10000.0));
     EnergySourceContainer sources = energy.Install(endDevices);
 
-    // Attach LoRa radio energy models with realistic current values
     LoraRadioEnergyModelHelper loraEnergy;
-    loraEnergy.Set("StandbyCurrentA", DoubleValue(0.0014));      // 1.4 mA standby
-    loraEnergy.Set("TxCurrentA", DoubleValue(0.028));            // 28 mA transmit
-    loraEnergy.Set("RxCurrentA", DoubleValue(0.0112));           // 11.2 mA receive
-    loraEnergy.Set("SleepCurrentA", DoubleValue(0.0000015));     // 1.5 µA sleep
+    loraEnergy.Set("StandbyCurrentA", DoubleValue(0.0014));
+    loraEnergy.Set("TxCurrentA", DoubleValue(0.028));
+    loraEnergy.Set("RxCurrentA", DoubleValue(0.0112));
+    loraEnergy.Set("SleepCurrentA", DoubleValue(0.0000015));
     
     for (uint32_t i = 0; i < endDevices.GetN(); ++i)
     {
@@ -212,7 +189,6 @@ int main(int argc, char* argv[])
     nsHelper.Install(networkServer);
     forHelper.Install(gateways);
 
-    // Task 6: start beaconing directly on each gateway MAC
     for (auto gw = gateways.Begin(); gw != gateways.End(); ++gw)
     {
         Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>((*gw)->GetDevice(0));
@@ -234,8 +210,6 @@ int main(int argc, char* argv[])
     appContainer.Start(Time(0));
     appContainer.Stop(appStopTime);
 
-    // Force a percentage of nodes into burst mode by toggling their PeriodicSender
-    // and applying burst slot multiplier to their MAC
     uint32_t burstCount = std::min<uint32_t>(endDevices.GetN(), (uint32_t)std::round(burstPct * endDevices.GetN()));
     for (uint32_t i = 0; i < burstCount && i < appContainer.GetN(); ++i)
     {
@@ -246,7 +220,6 @@ int main(int argc, char* argv[])
             ps->SetForceBurst(true);
             ps->SetInterval(Seconds(burstPeriodSecs));
         }
-        // Also set MAC slot multiplier for burst nodes
         Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(endDevices.Get(i)->GetDevice(0));
         Ptr<EndDeviceLorawanMac> mac = DynamicCast<EndDeviceLorawanMac>(dev->GetMac());
         if (mac)
@@ -255,7 +228,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    // Connect traces for metrics collection
     for (auto node = endDevices.Begin(); node != endDevices.End(); ++node)
     {
         DynamicCast<LoraNetDevice>((*node)->GetDevice(0))
@@ -273,7 +245,6 @@ int main(int argc, char* argv[])
     Simulator::Stop(appStopTime + Hours(1));
     Simulator::Run();
 
-    // Compute metrics (do this BEFORE Destroy to keep objects alive)
     double prr = (g_sent > 0) ? (double)g_recv / (double)g_sent : 0.0;
     
     double avgLatency = 0.0;

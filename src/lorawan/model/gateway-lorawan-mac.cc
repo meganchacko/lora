@@ -21,9 +21,7 @@ std::map<LoraDeviceAddress, std::tuple<uint32_t, uint32_t, uint8_t>> g_pendingSc
 NS_LOG_COMPONENT_DEFINE("GatewayLorawanMac");
 NS_OBJECT_ENSURE_REGISTERED(GatewayLorawanMac);
 
-// -----------------------------------------------------
-// TypeId
-// -----------------------------------------------------
+
 TypeId
 GatewayLorawanMac::GetTypeId()
 {
@@ -45,9 +43,7 @@ GatewayLorawanMac::~GatewayLorawanMac()
     NS_LOG_FUNCTION(this);
 }
 
-// -----------------------------------------------------
-// Helper Functions
-// -----------------------------------------------------
+
 bool
 GatewayLorawanMac::IsTransmitting()
 {
@@ -60,9 +56,7 @@ GatewayLorawanMac::GetWaitTime(uint32_t frequencyHz)
     return m_channelHelper->GetWaitTime(frequencyHz);
 }
 
-// -----------------------------------------------------
-// Send
-// -----------------------------------------------------
+
 void
 GatewayLorawanMac::Send(Ptr<Packet> packet)
 {
@@ -94,9 +88,6 @@ GatewayLorawanMac::Send(Ptr<Packet> packet)
     m_sentNewPacket(packet);
 }
 
-// -----------------------------------------------------
-// Receive (Core Burst-MAC logic)
-// -----------------------------------------------------
 void
 GatewayLorawanMac::Receive(Ptr<const Packet> packet)
 {
@@ -155,17 +146,11 @@ GatewayLorawanMac::Receive(Ptr<const Packet> packet)
         sf   = GetSfFromDataRate(tag.GetDataRate());
     }
 
-    // --------------------------
-    // Task 3: VC Grouping
-    // --------------------------
     if (haveAddr && freq != 0 && sf != 0)
     {
         UpdateVcGroup(srcAddr, freq, sf);
     }
 
-    // --------------------------
-    // Node Burst Bit (Task 2)
-    // --------------------------
     BurstTag burstTag;
     if (packetCopy->PeekPacketTag(burstTag) && burstTag.GetBurst())
     {
@@ -176,35 +161,15 @@ GatewayLorawanMac::Receive(Ptr<const Packet> packet)
         }
     }
 
-    // --------------------------
-    // Update collision statistics
-    // --------------------------
+
     if (freq != 0 && sf != 0)
         UpdateChannelStats(freq, sf, false);
 
-    // --------------------------
-    // Forward uplink to NetDevice
-    // --------------------------
+
     if (macHdr.IsUplink())
     {
         loraDev->Receive(packetCopy);
         m_receivedPacket(packet);
-
-        // Task 4: Schedule will be piggybacked on network server replies
-        // (direct sends commented out - they bypass RX window management)
-        /*
-        if (m_inBurstMac && haveAddr)
-        {
-            Simulator::Schedule(Seconds(1.0),
-                &GatewayLorawanMac::SendScheduleToDevice,
-                this, srcAddr, freq, sf);
-            Simulator::Schedule(Seconds(2.0),
-                &GatewayLorawanMac::SendScheduleToDevice,
-                this, srcAddr, freq, sf);
-            NS_LOG_INFO("Gateway queued schedule for RX1/RX2 windows → device="
-                        << srcAddr.Get());
-        }
-        */
 
     }
 }
@@ -227,9 +192,6 @@ GatewayLorawanMac::TxFinished(Ptr<const Packet> packet)
 {
 }
 
-// -----------------------------------------------------
-// VC Grouping (Task 3)
-// -----------------------------------------------------
 void
 GatewayLorawanMac::UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t sf)
 {
@@ -241,11 +203,9 @@ GatewayLorawanMac::UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t 
     uint32_t groupSize = group.size();
     m_groupSizes[key] = groupSize;
 
-    // Task 4: Hash-based slot assignment
     uint32_t slot = addr.Get() % groupSize;
     m_slotAssignments[addr] = slot;
     
-    // Store in global map for network server access
     g_pendingSchedules[addr] = std::make_tuple(slot, groupSize, sf);
 
     NS_LOG_INFO("VC Update: Device=" << addr.Get()
@@ -253,14 +213,10 @@ GatewayLorawanMac::UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t 
                                      << " SF=" << unsigned(sf)
                                      << " → slot=" << slot
                                      << " (group size=" << groupSize << ")");
-
-    // Task 5: Recompute schedule for this VC (detect and resolve collisions)
     RecomputeScheduleForVc(freq, sf);
 }
 
-// -----------------------------------------------------
-// Collision Stats (Task 2)
-// -----------------------------------------------------
+
 void
 GatewayLorawanMac::UpdateChannelStats(uint32_t freq, uint8_t sf, bool collision)
 {
@@ -289,9 +245,7 @@ GatewayLorawanMac::CheckBurstCondition(uint32_t freq, uint8_t sf)
     }
 }
 
-// -----------------------------------------------------
-// Send Schedule Downlink (Task 4)
-// -----------------------------------------------------
+
 void
 GatewayLorawanMac::SendScheduleToDevice(LoraDeviceAddress addr,
                                         uint32_t freq,
@@ -304,7 +258,6 @@ GatewayLorawanMac::SendScheduleToDevice(LoraDeviceAddress addr,
 
     uint32_t groupSize = m_groupSizes[key];
     uint32_t slot      = m_slotAssignments[addr];
-    // Apply override if gateway reassigned this device's slot (Task 5)
     auto vcOverridesIt = m_slotOverrides.find(key);
     if (vcOverridesIt != m_slotOverrides.end())
     {
@@ -318,26 +271,22 @@ GatewayLorawanMac::SendScheduleToDevice(LoraDeviceAddress addr,
 
     Ptr<Packet> down = Create<Packet>();
 
-    // ---- Correct LoRaWAN Header Order ----
-    // 1. FHDR (Frame Header)
+  
     LoraFrameHeader fhdr;
     fhdr.SetAsDownlink();
     fhdr.SetAddress(addr);
     fhdr.SetFCnt(0);
     down->AddHeader(fhdr);
 
-    // 2. MAC Header
     LorawanMacHeader macHdr;
     macHdr.SetMType(LorawanMacHeader::UNCONFIRMED_DATA_DOWN);
     macHdr.SetMajor(1);
     down->AddHeader(macHdr);
 
-    // ---- Add Schedule Tag LAST (CRITICAL FIX) ----
     ScheduleTag s;
     s.Set(slot, groupSize, sf);
     down->AddPacketTag(s);
 
-    // ---- TX parameters ----
     LoraTxParameters params;
     params.sf = sf;
     params.bandwidthHz = 125000;
@@ -356,9 +305,7 @@ GatewayLorawanMac::SendScheduleToDevice(LoraDeviceAddress addr,
                  << " sf=" << unsigned(sf));
 }
 
-// -----------------------------------------------------
-// Task 5: Collision Resolution for a VC
-// -----------------------------------------------------
+
 void
 GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
 {
@@ -372,7 +319,6 @@ GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
     if (groupSize == 0)
         return;
 
-    // Build occupancy: slot -> addresses assigned by base hash rule
     std::map<uint32_t, std::vector<LoraDeviceAddress>> occupancy;
     for (const auto &addr : group)
     {
@@ -380,7 +326,6 @@ GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
         occupancy[baseSlot].push_back(addr);
     }
 
-    // Identify empty slots and colliding nodes
     std::vector<uint32_t> freeSlots;
     std::vector<LoraDeviceAddress> collidingNodes;
 
@@ -393,7 +338,6 @@ GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
         }
         else if (it->second.size() > 1)
         {
-            // keep first as-is; others considered colliding
             for (size_t i = 1; i < it->second.size(); ++i)
             {
                 collidingNodes.push_back(it->second[i]);
@@ -401,25 +345,22 @@ GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
         }
     }
 
-    // Prepare override map for this VC
     auto &overrides = m_slotOverrides[key];
     overrides.clear();
 
-    // Reassign colliding nodes into free slots
     size_t idx = 0;
     while (idx < collidingNodes.size() && idx < freeSlots.size())
     {
         LoraDeviceAddress addr = collidingNodes[idx];
         uint32_t newSlot = freeSlots[idx];
         overrides[addr] = newSlot;
-        m_slotAssignments[addr] = newSlot; // keep a consistent view
+        m_slotAssignments[addr] = newSlot;
         NS_LOG_INFO("Task 5: Reassigned device=" << addr.Get()
                     << " to freeSlot=" << newSlot
                     << " in VC (" << freq << ", SF" << unsigned(sf) << ")");
         ++idx;
     }
 
-    // If there are still colliding nodes but no free slots, we leave them as-is for now.
     if (idx < collidingNodes.size())
     {
         NS_LOG_INFO("Task 5: Remaining collisions (" << (collidingNodes.size() - idx)
@@ -427,9 +368,7 @@ GatewayLorawanMac::RecomputeScheduleForVc(uint32_t freq, uint8_t sf)
     }
 }
 
-// -----------------------------------------------------
-// Task 6: Beaconing
-// -----------------------------------------------------
+
 void
 GatewayLorawanMac::StartBeacons(Time period)
 {
@@ -438,7 +377,6 @@ GatewayLorawanMac::StartBeacons(Time period)
         return;
     }
     m_beaconPeriod = period;
-    // Start after short delay to allow setup
     m_beaconEvent = Simulator::Schedule(Seconds(2.0), &GatewayLorawanMac::SendBeacon, this);
     NS_LOG_INFO("Gateway starting beacons period=" << m_beaconPeriod.As(Time::S));
 }
@@ -446,12 +384,10 @@ GatewayLorawanMac::StartBeacons(Time period)
 void
 GatewayLorawanMac::SendBeacon()
 {
-    // Choose a default channel (first enabled for downlink)
     uint32_t freq = 0;
-    uint8_t sf = 7; // Use SF7 for beacon (fast)
+    uint8_t sf = 7;
     for (const auto &ch : m_channelHelper->GetRawChannelArray())
     {
-        // Use uplink-enabled channels also for beacon downlink; API only exposes IsEnabledForUplink
         if (ch && ch->IsEnabledForUplink())
         {
             freq = ch->GetFrequency();
@@ -460,32 +396,27 @@ GatewayLorawanMac::SendBeacon()
     }
     if (freq == 0)
     {
-        // fallback EU first channel
         freq = 868100000;
     }
 
     Ptr<Packet> down = Create<Packet>();
 
-    // Frame header
     LoraFrameHeader fhdr;
     fhdr.SetAsDownlink();
-    fhdr.SetAddress(LoraDeviceAddress(0)); // 0 used as generic beacon address
+    fhdr.SetAddress(LoraDeviceAddress(0)); 
     fhdr.SetFCnt(0);
     down->AddHeader(fhdr);
 
-    // MAC header
     LorawanMacHeader macHdr;
     macHdr.SetMType(LorawanMacHeader::UNCONFIRMED_DATA_DOWN);
     macHdr.SetMajor(1);
-    macHdr.SetBurst(true); // mark as burst-related
+    macHdr.SetBurst(true);
     down->AddHeader(macHdr);
 
-    // Beacon tag
     BeaconTag bt;
     bt.SetEpoch(Simulator::Now().GetMilliSeconds());
     down->AddPacketTag(bt);
 
-    // TX params (derived from sf)
     LoraTxParameters params;
     params.sf = sf;
     params.bandwidthHz = 125000;
@@ -504,7 +435,6 @@ GatewayLorawanMac::SendBeacon()
                  << " sf=" << unsigned(sf)
                  << " epochMs=" << bt.GetEpoch());
 
-    // Reschedule next beacon
     if (!m_beaconPeriod.IsZero())
     {
         m_beaconEvent = Simulator::Schedule(m_beaconPeriod, &GatewayLorawanMac::SendBeacon, this);

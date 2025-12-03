@@ -661,5 +661,49 @@ LorawanMacHelper::SetSpreadingFactorsGivenDistribution(NodeContainer endDevices,
 
 } //  end function
 
+void
+LorawanMacHelper::SetupVirtualChannels(NodeContainer endDevices)
+{
+    NS_LOG_FUNCTION_NOARGS();
+
+    std::map<std::pair<uint8_t, uint8_t>, std::vector<uint32_t>> vcGroups;
+    
+    for (uint32_t i = 0; i < endDevices.GetN(); ++i)
+    {
+        Ptr<Node> node = endDevices.Get(i);
+        Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(node->GetDevice(0));
+        Ptr<EndDeviceLorawanMac> mac = DynamicCast<EndDeviceLorawanMac>(dev->GetMac());
+        
+        uint8_t dr = mac->GetDataRate();
+        uint8_t sf = 12 - dr;
+        uint8_t channel = 0;
+        
+        std::pair<uint8_t, uint8_t> vcKey = {channel, sf};
+        vcGroups[vcKey].push_back(i);
+    }
+    
+    for (auto& vcPair : vcGroups)
+    {
+        uint8_t channel = vcPair.first.first;
+        uint8_t sf = vcPair.first.second;
+        std::vector<uint32_t>& nodeIndices = vcPair.second;
+        uint32_t groupSize = nodeIndices.size();
+        
+        NS_LOG_INFO("VC (" << (uint32_t)channel << "," << (uint32_t)sf 
+                    << ") has " << groupSize << " nodes");
+        
+        for (size_t j = 0; j < nodeIndices.size(); ++j)
+        {
+            uint32_t nodeIdx = nodeIndices[j];
+            Ptr<Node> node = endDevices.Get(nodeIdx);
+            Ptr<LoraNetDevice> dev = DynamicCast<LoraNetDevice>(node->GetDevice(0));
+            Ptr<EndDeviceLorawanMac> mac = DynamicCast<EndDeviceLorawanMac>(dev->GetMac());
+            
+            uint32_t slotIndex = nodeIdx % groupSize;
+            mac->SetSchedule(slotIndex, groupSize, sf);
+        }
+    }
+}
+
 } // namespace lorawan
 } // namespace ns3

@@ -149,9 +149,7 @@ EndDeviceLorawanMac::Send(Ptr<Packet> packet)
 {
     NS_LOG_FUNCTION(this << packet);
 
-    // ----------------------------------------------------------------------
-    // RETRANSMISSION HANDLING
-    // ----------------------------------------------------------------------
+    
     NS_ASSERT_MSG(packet != m_retxParams.packet || m_retxParams.retxLeft > 0,
                   "Max number of transmissions already achieved for this packet");
 
@@ -162,7 +160,6 @@ EndDeviceLorawanMac::Send(Ptr<Packet> packet)
         NS_ASSERT_MSG(m_retxParams.waitingAck,
                       "Trying to retransmit a packet already ACKed.");
 
-        // Remove old headers so fresh ones can be added
         LorawanMacHeader macHdr;
         packet->RemoveHeader(macHdr);
 
@@ -173,7 +170,6 @@ EndDeviceLorawanMac::Send(Ptr<Packet> packet)
     {
         NS_LOG_DEBUG("New FRMPayload from application: " << packet);
 
-        // Stop an old retransmission process if needed
         if (m_retxParams.waitingAck)
         {
             uint8_t txs = m_nbTrans - m_retxParams.retxLeft;
@@ -217,11 +213,7 @@ EndDeviceLorawanMac::Send(Ptr<Packet> packet)
         m_cannotSendBecauseDutyCycle(packet);
         return;
     }
-///////////////////////////////////////////////////////
-// From here on out, the pkt transmission is assured //
-///////////////////////////////////////////////////////
 
-// ---- Burst-MAC Scheduling (Task 4) ----
 if (m_inBurstMac && m_hasSchedule)
 {
     Time slotLen = GetSlotLength(m_sf);
@@ -235,7 +227,6 @@ if (m_inBurstMac && m_hasSchedule)
 
     Time frameStart = Seconds(frameStartSec);
 
-    // Schedule in m_slotMultiplier evenly spaced slots within the epoch
     uint32_t mult = std::max<uint32_t>(1, m_slotMultiplier);
     uint32_t step = std::max<uint32_t>(1, m_groupSize / mult);
     for (uint32_t k = 0; k < mult; ++k)
@@ -259,7 +250,6 @@ if (m_inBurstMac && m_hasSchedule)
     return;
 }
 
-// ---- Normal LoRaWAN immediate TX ----
 DoSend(packet);
 
 }
@@ -268,7 +258,6 @@ void
 EndDeviceLorawanMac::PostponeTransmission(Time netxTxDelay, Ptr<Packet> packet)
 {
     NS_LOG_FUNCTION(this);
-    // Delete previously scheduled transmissions if any.
     Simulator::Cancel(m_nextTx);
     m_nextTx = Simulator::Schedule(netxTxDelay, &EndDeviceLorawanMac::DoSend, this, packet);
     NS_LOG_WARN("Attempting to send, but the aggregate duty cycle won't allow it. Scheduling a tx "
@@ -295,26 +284,19 @@ EndDeviceLorawanMac::DoSend(Ptr<Packet> packet)
     if (packet != m_retxParams.packet)
     {
         NS_LOG_DEBUG("Resetting retransmission parameters.");
-        // Reset MAC command list
-        /// TODO: Some commands should only be removed on ACK
         m_macCommandList.clear();
-        // Reset retransmission parameters
         ResetRetransmissionParameters();
-        // Save parameters for the (possible) next retransmissions.
         m_retxParams.packet = packet->Copy();
         m_retxParams.firstAttempt = Now();
         m_retxParams.waitingAck = (m_mType == LorawanMacHeader::CONFIRMED_DATA_UP);
         NS_LOG_DEBUG("Message type is " << m_mType);
     }
 
-    // Send packet
     SendToPhy(packet);
-    // Decrease the number of transmissions left
     m_retxParams.retxLeft--;
     if (packet != m_retxParams.packet)
     {
-        m_sentNewPacket(packet); // Fire trace source
-        // Bump-up frame counters
+        m_sentNewPacket(packet); 
         m_currentFCnt++;
         m_adrAckCnt++;
     }
@@ -330,9 +312,6 @@ EndDeviceLorawanMac::ExecuteADRBackoff()
 {
     NS_LOG_FUNCTION(this);
 
-    // Adapted from: github.com/Lora-net/SWL2001.git v4.8.0
-    // For the time being, this implementation is valid for the EU868 region
-
     if (!m_adr)
     {
         return;
@@ -340,7 +319,7 @@ EndDeviceLorawanMac::ExecuteADRBackoff()
 
     if (m_txPowerDbm < 14)
     {
-        m_txPowerDbm = 14; // Reset transmission power to default
+        m_txPowerDbm = 14; 
         return;
     }
 
@@ -350,7 +329,6 @@ EndDeviceLorawanMac::ExecuteADRBackoff()
         return;
     }
 
-    // Set nbTrans to 1 and re-enable default channels
     m_nbTrans = 1;
     auto channels = m_channelHelper->GetRawChannelArray();
     channels.at(0)->EnableForUplink();
@@ -366,7 +344,6 @@ EndDeviceLorawanMac::IsPayloadSizeValid(uint32_t appPayloadSize, uint8_t dataRat
     {
         fOptsLen += c->GetSerializedSize();
     }
-    /// TODO: FPort could be absent
     NS_LOG_LOGIC("FHDR(7+FOpts(" << fOptsLen << "))+FPort(1)+FRMPayload(" << appPayloadSize
                                  << ")=" << 7 + fOptsLen + 1 + appPayloadSize
                                  << "B, max MACPayload=" << m_maxMacPayloadForDataRate.at(dataRate)
@@ -374,9 +351,6 @@ EndDeviceLorawanMac::IsPayloadSizeValid(uint32_t appPayloadSize, uint8_t dataRat
     return 7 + fOptsLen + 1 + appPayloadSize <= m_maxMacPayloadForDataRate.at(dataRate);
 }
 
-//////////////////////////
-//  Receiving methods   //
-//////////////////////////
 
 void
 EndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
@@ -385,14 +359,12 @@ EndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
 
     NS_LOG_INFO("EndDeviceLorawanMac::Receive called, packet size=" << packet->GetSize());
 
-    // ---- Task 4: Scheduling info from gateway ----
     ScheduleTag sched;
     if (packet->PeekPacketTag(sched))
     {
         ApplySchedule(sched.GetSlot(), sched.GetGroupSize(), sched.GetSf());
     }
 
-    // ---- Optional: BurstTag ----
     BurstTag burstTag;
     if (packet->PeekPacketTag(burstTag))
     {
@@ -402,21 +374,18 @@ EndDeviceLorawanMac::Receive(Ptr<const Packet> packet)
         }
     }
 
-    // ---- Task 6: Beacon handling (enter burst Class B-like) ----
     {
         BeaconTag beacon;
         if (packet->PeekPacketTag(beacon))
         {
             EnterBurstMode();
-                // Align epoch start to beacon timestamp
                 m_epochStart = MilliSeconds(beacon.GetEpoch());
                 NS_LOG_INFO("Node received beacon → entering burst mode (Class B-like), epoch="
                             << beacon.GetEpoch());
         }
     }
 
-    // ---- Pass packet to higher layer ----
-    m_receivedPacket(packet);   // SAFE CALLBACK
+    m_receivedPacket(packet);   
 }
 
 void
@@ -491,7 +460,6 @@ EndDeviceLorawanMac::ParseCommands(LoraFrameHeader frameHeader)
             NS_LOG_DEBUG("Received ACK packet after "
                          << unsigned(txs) << " transmissions: stopping retransmission procedure. ");
 
-            // Reset retransmission parameters
             ResetRetransmissionParameters();
         }
         else
@@ -671,7 +639,6 @@ Ptr<LogicalLoraChannel>
 EndDeviceLorawanMac::GetRandomChannelForTx()
 {
     NS_LOG_FUNCTION(this);
-    /// @todo possibly move to LogicalChannelHelper
     std::vector<Ptr<LogicalLoraChannel>> candidates;
     for (const auto& channel : GetCompatibleTxChannels())
     {
@@ -703,7 +670,6 @@ EndDeviceLorawanMac::ResetRetransmissionParameters()
     m_retxParams.packet = nullptr;
     m_retxParams.firstAttempt = Time(0);
 
-    // Cancel next retransmissions, if any
     Simulator::Cancel(m_nextTx);
 }
 
@@ -743,9 +709,7 @@ EndDeviceLorawanMac::SetDataRate(uint8_t dataRate)
 
     m_dataRate = dataRate;
     
-    // ---- Task 4: Update spreading factor when data rate changes ----
-    // Map data rate to spreading factor (EU868)
-    // DR0=SF12, DR1=SF11, DR2=SF10, DR3=SF9, DR4=SF8, DR5=SF7
+   
     switch (dataRate)
     {
         case 0:
@@ -864,7 +828,6 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
             }
         }
         break;
-    // All channels ON independently of the ChMask field value
     case 6:
         chMask = 0b0;
         for (size_t i = 0; i < channels.size(); ++i)
@@ -881,26 +844,24 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
         break;
     }
 
-    // check if all channels are disabled
     if (chMask == 0)
     {
         NS_LOG_WARN("Invalid channel mask");
         channelMaskAck = false;
     }
 
-    // Temporary channel mask is built and validated
-    if (!m_adr) // ADR disabled, only consider channel mask conf.
+    
+    if (!m_adr) 
     {
-        /// @remark Original code considers this to be mobile-mode
-        if (channelMaskAck) // valid channel mask
+
+        if (channelMaskAck) 
         {
             bool compatible = false;
-            // Look for enabled channel that supports current data rate.
             for (size_t i = 0; i < channels.size(); ++i)
             {
                 if ((chMask & 0b1 << i) && m_dataRate >= channels.at(i)->GetMinimumDataRate() &&
                     m_dataRate <= channels.at(i)->GetMaximumDataRate())
-                { // Found compatible channel, break loop
+                { 
                     compatible = true;
                     break;
                 }
@@ -908,9 +869,9 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
             if (!compatible)
             {
                 NS_LOG_WARN("Invalid channel mask for current device data rate (ADR off)");
-                channelMaskAck = dataRateAck = powerAck = false; // reject all configurations
+                channelMaskAck = dataRateAck = powerAck = false;
             }
-            else // apply channel mask configuration
+            else 
             {
                 for (size_t i = 0; i < channels.size(); ++i)
                 {
@@ -919,7 +880,7 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
                         (chMask & 0b1 << i) ? c->EnableForUplink() : c->DisableForUplink();
                     }
                 }
-                dataRateAck = powerAck = false; // only ack channel mask
+                dataRateAck = powerAck = false; 
             }
         }
         else // reject
@@ -957,7 +918,6 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
                     }
                 }
             }
-            // Check if it is acceptable
             if (!compatible)
             {
                 NS_LOG_WARN("Invalid data rate");
@@ -967,7 +927,6 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
 
         if (txPower != 0xF) // If value is 0xF, ignore config.
         {
-            // Check if it is acceptable
             if (GetDbmForTxPower(txPower) < 0)
             {
                 NS_LOG_WARN("Invalid tx power");
@@ -975,7 +934,6 @@ EndDeviceLorawanMac::OnLinkAdrReq(uint8_t dataRate,
             }
         }
 
-        // If no error, apply configurations
         if (channelMaskAck && dataRateAck && powerAck)
         {
             for (size_t i = 0; i < channels.size(); ++i)
@@ -1019,13 +977,13 @@ EndDeviceLorawanMac::OnDevStatusReq()
 {
     NS_LOG_FUNCTION(this);
 
-    uint8_t battery = 255; // could not measure
+    uint8_t battery = 255; 
     if (m_device && m_device->GetNode())
     {
         if (auto sc = m_device->GetNode()->GetObject<energy::EnergySourceContainer>();
             sc && sc->GetN() == 1)
         {
-            battery = sc->Get(0)->GetEnergyFraction() * 253 + 1.5; // range 1-254
+            battery = sc->Get(0)->GetEnergyFraction() * 253 + 1.5; 
         }
     }
     else
@@ -1033,11 +991,8 @@ EndDeviceLorawanMac::OnDevStatusReq()
         battery = 0; // external power source
     }
 
-    // approximate to nearest integer
     double snr = round(m_lastRxSnr);
-    // clamp value to boundaries
     snr = snr < -32 ? -32 : snr > 31 ? 31 : snr;
-    // cast to 6-bit signed int and store in uint8_t
     uint8_t margin = std::bitset<6>(snr).to_ulong();
 
     NS_LOG_INFO("Adding DevStatusAns reply");
@@ -1056,27 +1011,21 @@ EndDeviceLorawanMac::OnNewChannelReq(uint8_t chIndex,
     NS_ASSERT_MSG(!(minDataRate & 0xF0), "minDataRate field > 4 bits");
     NS_ASSERT_MSG(!(maxDataRate & 0xF0), "maxDataRate field > 4 bits");
 
-    // Adapted from: github.com/Lora-net/SWL2001.git v4.3.1
-    // For the time being, this implementation is valid for the EU868 region
-
     bool dataRateRangeOk = true;
     bool channelFrequencyOk = true;
 
-    // Valid Channel Index
     if (chIndex < 3 || chIndex > m_channelHelper->GetRawChannelArray().size() - 1)
     {
         NS_LOG_WARN("[WARNING] Invalid channel index");
         dataRateRangeOk = channelFrequencyOk = false;
     }
 
-    // Valid Frequency
     if (frequencyHz != 0 && !m_channelHelper->IsFrequencyValid(frequencyHz))
     {
         NS_LOG_WARN("[WARNING] Invalid frequency");
         channelFrequencyOk = false;
     }
 
-    // Valid DRMIN/MAX
     if (!GetSfFromDataRate(minDataRate) || !GetBandwidthFromDataRate(minDataRate))
     {
         NS_LOG_WARN("[WARNING] Invalid DR min");

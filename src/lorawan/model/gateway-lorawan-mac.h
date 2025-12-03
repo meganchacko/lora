@@ -17,7 +17,6 @@ namespace ns3
 namespace lorawan
 {
 
-// Global schedule storage for network server access
 extern std::map<LoraDeviceAddress, std::tuple<uint32_t, uint32_t, uint8_t>> g_pendingSchedules;
 
 class GatewayLorawanMac : public LorawanMac
@@ -38,9 +37,7 @@ public:
 
 private:
 
-    ////////////////////////////////////////
-    // Task 2 — Burst Mode Detection
-    ////////////////////////////////////////
+  
     bool m_inBurstMac = false;
 
     std::map<std::pair<uint32_t, uint8_t>, uint32_t> m_successCount;
@@ -49,39 +46,27 @@ private:
     void UpdateChannelStats(uint32_t freq, uint8_t sf, bool collision);
     void CheckBurstCondition(uint32_t freq, uint8_t sf);
 
-    ////////////////////////////////////////
-    // Task 3 — Virtual Channel Groups
-    ////////////////////////////////////////
-    // VC = (freq, SF) → set of device addresses
+   
     std::map<std::pair<uint32_t, uint8_t>, std::set<LoraDeviceAddress>> m_vcGroups;
 
     void UpdateVcGroup(LoraDeviceAddress addr, uint32_t freq, uint8_t sf);
 
-    ////////////////////////////////////////
-    // Task 4 — Hash-Based Scheduling
-    ////////////////////////////////////////
+
 public:
-    // For each device → assigned slot
     std::map<LoraDeviceAddress, uint32_t> m_slotAssignments;
 
-    // For each VC → group size
     std::map<std::pair<uint32_t, uint8_t>, uint32_t> m_groupSizes;
 
 private:
-    // Task 5 — Collision Resolution
-    // For each VC → per-device slot overrides assigned by gateway
+   
     std::map<std::pair<uint32_t, uint8_t>, std::map<LoraDeviceAddress, uint32_t>> m_slotOverrides;
 
-    // Recompute schedule for a given VC: detect collisions and reassign unused slots
     void RecomputeScheduleForVc(uint32_t freq, uint8_t sf);
 
     void SendScheduleToDevice(LoraDeviceAddress addr,
                               uint32_t freq,
                               uint8_t sf);
 
-    ////////////////////////////////////////
-    // Task 6 — Beaconing (Class B-like)
-    ////////////////////////////////////////
 public:
     void StartBeacons(Time period);
 private:
@@ -95,4 +80,4 @@ protected:
 } // namespace lorawan
 } // namespace ns3
 
-#endif /* GATEWAY_LORAWAN_MAC_H */
+#endif 

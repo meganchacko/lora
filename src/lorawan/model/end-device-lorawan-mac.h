@@ -433,24 +433,20 @@ class EndDeviceLorawanMac : public LorawanMac
     TracedCallback<uint8_t, bool, Time, Ptr<Packet>> m_requiredTxCallback;
 
   protected:
-    // Helpers for subclasses to adjust Burst-MAC state without accessing privates
     void ApplySchedule(uint32_t slot, uint32_t groupSize, uint8_t sf);
     void EnterBurstMode();
-    // Helper for subclasses to query next TX delay without exposing internals
     Time GetNextTxDelaySafe();
 
   private:
-    // --- Burst-MAC Scheduling State (Task 4+) ---
-    bool m_inBurstMac = false;   // set when node detects burst mode
-    bool m_hasSchedule = false;  // true after receiving ScheduleTag
+    bool m_inBurstMac = false;
+    bool m_hasSchedule = false;
 
-    uint32_t m_slotIndex = 0;    // assigned hash slot
-    uint32_t m_groupSize = 1;    // number of slots in the epoch
-    uint8_t  m_sf = 7;           // spreading factor (needed for slot length)
-    Time     m_epochStart = Seconds(0); // start of current epoch from beacon
-    uint32_t m_slotMultiplier = 1; // number of slots per epoch to use (>=1)
+    uint32_t m_slotIndex = 0;
+    uint32_t m_groupSize = 1;
+    uint8_t  m_sf = 7;
+    Time     m_epochStart = Seconds(0);
+    uint32_t m_slotMultiplier = 1;
 
-    // Inline helper to compute slot length from SF (Task 4)
     Time GetSlotLength(uint8_t sf)
     {
         Time L = MilliSeconds(100);
@@ -467,7 +463,6 @@ class EndDeviceLorawanMac : public LorawanMac
         return 4 * L;
     }
 
-    // Inline helper to perform scheduled send (Task 4)
     void DoScheduledSend(Ptr<Packet> packet)
     {
         DoSend(packet);
